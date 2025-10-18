@@ -262,7 +262,67 @@ For the container to persist AD membership across restarts, the following should
 - `/var/lib/samba/private/` - Samba secrets
 - Root crontab - Refresh schedule
 
-**Important**: If the container is recreated (not just restarted), it will re-initialize and may create duplicate computer accounts in AD unless volumes are properly configured.
+### Why Persistence Matters
+
+**Without persistent volumes, recreating the container causes problems:**
+
+1. **Duplicate Computer Accounts**: Each realm/domain join creates a computer account in Active Directory. Without running `realm leave` / `net ads leave` before destroying the container, AD accumulates stale computer accounts.
+
+2. **Computer Account Quota**: AD has a default limit of 10 computer accounts per user. Repeatedly joining without cleanup will hit this limit and prevent new joins.
+
+3. **Security Audit Trail**: Creates confusing audit logs with multiple join/leave events that make it difficult to track actual security events.
+
+4. **Unnecessary Load**: Hits the domain controllers unnecessarily on every container restart, wasting resources.
+
+5. **The `.initialized` Marker Exists for This Reason**: The entrypoint script explicitly checks for this marker to avoid re-joining on container restart.
+
+### Docker Compose Volume Configuration
+
+**Recommended approach using named volumes:**
+
+```yaml
+services:
+  kerberos:
+    image: your-kerberos-image:latest
+    environment:
+      AD_ADMIN_USER: "admin"
+      AD_ADMIN_PASS: "password"
+      SAMBA_GLOBAL_CONFIG_realm: "EXAMPLE.COM"
+    volumes:
+      # Persist AD membership state
+      - kerberos-data:/var/lib/samba/private
+      - kerberos-sssd:/var/lib/sss/db
+      - kerberos-krb5:/etc/krb5.conf
+      - kerberos-keytab:/etc/krb5.keytab
+      - kerberos-init:/.initialized
+
+volumes:
+  kerberos-data:
+  kerberos-sssd:
+  kerberos-krb5:
+  kerberos-keytab:
+  kerberos-init:
+```
+
+**Alternative using bind mounts:**
+
+```yaml
+services:
+  kerberos:
+    image: your-kerberos-image:latest
+    environment:
+      AD_ADMIN_USER: "admin"
+      AD_ADMIN_PASS: "password"
+      SAMBA_GLOBAL_CONFIG_realm: "EXAMPLE.COM"
+    volumes:
+      - ./kerberos-data/samba:/var/lib/samba/private
+      - ./kerberos-data/sssd:/var/lib/sss/db
+      - ./kerberos-data/krb5.conf:/etc/krb5.conf
+      - ./kerberos-data/krb5.keytab:/etc/krb5.keytab
+      - ./kerberos-data/.initialized:/.initialized
+```
+
+**Note**: The root crontab is stored in `/var/spool/cron/crontabs/root` and typically doesn't need explicit persistence as it's recreated during initialization.
 
 ## Error Handling
 
@@ -284,6 +344,65 @@ This ensures failures are caught early and exit codes accurately reflect the fai
 3. **Keytab Security**: The `/etc/krb5.keytab` file contains sensitive authentication keys and should be protected
 4. **Shared Authentication**: Keytab can be shared with other containers for unified AD authentication
 
+### Using Docker Secrets for Credentials
+
+**Instead of plain environment variables, use Docker secrets in production:**
+
+```yaml
+services:
+  kerberos:
+    image: your-kerberos-image:latest
+    environment:
+      AD_ADMIN_USER: "admin"
+      SAMBA_GLOBAL_CONFIG_realm: "EXAMPLE.COM"
+    secrets:
+      - ad_admin_password
+    # Map secret to environment variable expected by the container
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        export AD_ADMIN_PASS=$(cat /run/secrets/ad_admin_password)
+        exec /usr/local/bin/entrypoint.sh
+
+secrets:
+  ad_admin_password:
+    file: ./secrets/ad_admin_password.txt
+```
+
+**Or using Docker Swarm secrets:**
+
+```yaml
+services:
+  kerberos:
+    image: your-kerberos-image:latest
+    environment:
+      AD_ADMIN_USER: "admin"
+      SAMBA_GLOBAL_CONFIG_realm: "EXAMPLE.COM"
+    secrets:
+      - ad_admin_password
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        export AD_ADMIN_PASS=$(cat /run/secrets/ad_admin_password)
+        exec /usr/local/bin/entrypoint.sh
+
+secrets:
+  ad_admin_password:
+    external: true
+```
+
+**Create the secret:**
+```bash
+# For file-based secrets
+echo "your-password" > ./secrets/ad_admin_password.txt
+chmod 600 ./secrets/ad_admin_password.txt
+
+# For Docker Swarm
+echo "your-password" | docker secret create ad_admin_password -
+```
+
 ## Troubleshooting
 
 ### Container fails to initialize
@@ -292,6 +411,38 @@ This ensures failures are caught early and exit codes accurately reflect the fai
 3. Check DNS resolution for the AD realm
 4. Verify network connectivity to domain controllers
 5. Confirm admin credentials are valid
+
+**DNS Verification Commands:**
+```bash
+# Check if the AD realm resolves
+nslookup EXAMPLE.COM
+
+# Check LDAP service discovery (critical for AD)
+nslookup -type=SRV _ldap._tcp.dc._msdcs.EXAMPLE.COM
+
+# Check Kerberos service discovery
+nslookup -type=SRV _kerberos._tcp.EXAMPLE.COM
+
+# Alternative using dig
+dig EXAMPLE.COM A
+dig _ldap._tcp.dc._msdcs.EXAMPLE.COM SRV
+dig _kerberos._tcp.EXAMPLE.COM SRV
+```
+
+**Network Connectivity Verification:**
+```bash
+# Test LDAP connectivity to domain controller
+nc -zv dc.example.com 389
+
+# Test Kerberos connectivity
+nc -zv dc.example.com 88
+
+# Test Kerberos password change service
+nc -zv dc.example.com 464
+
+# Test DNS connectivity
+nc -zv dc.example.com 53
+```
 
 ### Keytab refresh fails
 1. Check `/var/log/keytab-refresh.log` for error details

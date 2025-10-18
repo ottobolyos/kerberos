@@ -1,3 +1,30 @@
+# Kerberos Container for Active Directory Integration
+#
+# This container provides shared Kerberos authentication for services that need
+# to authenticate against Active Directory. It handles AD domain joining, keytab
+# creation, and automated keytab refresh.
+#
+# Documentation: See /run/media/ts/root/home/ts/git/mriiot/otto/kerberos/readme.md for:
+# - Container architecture and lifecycle
+# - Environment variables and configuration
+# - Docker Compose deployment examples
+# - Security best practices and troubleshooting
+#
+# Key Features:
+# - Minimal Ubuntu 24.04 base (only AD client packages, not full Samba server)
+# - "Join once, maintain forever" pattern with initialization marker
+# - Automated keytab refresh every 7 days via cron
+# - Supports both host and container DNS registration modes
+#
+# Required Environment Variables:
+# - AD_ADMIN_USER: Active Directory administrator username
+# - AD_ADMIN_PASS: Password for the AD admin account
+# - SAMBA_GLOBAL_CONFIG_realm: AD realm/domain (e.g., EXAMPLE.COM)
+#
+# Optional Environment Variables:
+# - HOST_IP: Docker host IP for DNS registration
+# - HOST_HOSTNAME: Docker host hostname for DNS registration
+
 FROM ubuntu:24.04
 
 # Prevent interactive prompts during package installation

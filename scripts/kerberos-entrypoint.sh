@@ -3,6 +3,12 @@
 # Kerberos container entrypoint
 # Joins Active Directory and exports keytab for shared authentication
 #
+# Documentation: See /run/media/ts/root/home/ts/git/mriiot/otto/kerberos/readme.md for:
+# - Complete AD initialization flow (8 steps)
+# - Environment variables reference
+# - Troubleshooting guides
+# - Container lifecycle and architecture
+#
 # Dependencies:
 # - bash
 # - coreutils (cat, touch)

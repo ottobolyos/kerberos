@@ -3,6 +3,11 @@
 # Kerberos keytab refresh script
 # Runs periodically to refresh keytab before AD password rotation (30 days)
 #
+# Documentation: See /run/media/ts/root/home/ts/git/mriiot/otto/kerberos/readme.md for:
+# - Keytab refresh mechanism and rationale
+# - Cron schedule configuration (7-day cycle)
+# - Troubleshooting keytab refresh failures
+#
 # Dependencies:
 # - bash
 # - samba-common-bin (net)
