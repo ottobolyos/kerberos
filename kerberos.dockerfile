@@ -12,16 +12,26 @@
 #
 # Key Features:
 # - Minimal Ubuntu 24.04 base (only AD client packages, not full Samba server)
+# - Dynamic krb5.conf generation from KERBEROS_* environment variables
 # - "Join once, maintain forever" pattern with initialization marker
 # - Automated keytab refresh every 7 days via cron
 # - Supports both host and container DNS registration modes
 #
 # Required Environment Variables:
-# - AD_ADMIN_USER: Active Directory administrator username
-# - AD_ADMIN_PASS: Password for the AD admin account
-# - SAMBA_GLOBAL_CONFIG_realm: AD realm/domain (e.g., EXAMPLE.COM)
+# - KERBEROS_ADMIN_USER: Active Directory administrator username
+# - KERBEROS_ADMIN_PASSWORD: Password for the AD admin account
+# - KERBEROS_REALM: AD realm/domain (e.g., EXAMPLE.COM)
 #
-# Optional Environment Variables:
+# Optional Environment Variables (Kerberos Configuration):
+# - KERBEROS_DOMAIN: DNS domain name (defaults to lowercase KERBEROS_REALM)
+# - KERBEROS_KDC_SERVERS: Space-separated list of KDC servers (auto-discovered if not set)
+# - KERBEROS_TICKET_LIFETIME: Kerberos ticket lifetime (default: 24h)
+# - KERBEROS_RENEW_LIFETIME: Ticket renewal lifetime (default: 7d)
+# - KERBEROS_DNS_LOOKUP_KDC: Use DNS to locate KDCs (default: true)
+# - KERBEROS_FORWARDABLE: Allow ticket forwarding (default: true)
+# - KERBEROS_RDNS: Enable reverse DNS lookups (default: false)
+#
+# Optional Environment Variables (DNS Registration):
 # - HOST_IP: Docker host IP for DNS registration
 # - HOST_HOSTNAME: Docker host hostname for DNS registration
 

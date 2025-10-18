@@ -6,6 +6,7 @@ This repository contains a containerized Active Directory integration service th
 
 This is a minimal Ubuntu 24.04-based container that:
 - Joins an Active Directory domain
+- Dynamically generates Kerberos configuration from environment variables
 - Creates and maintains Kerberos keytabs for shared authentication
 - Provides keytabs to other services via volume mounts
 - Automatically refreshes keytabs to stay ahead of AD password rotation
@@ -22,8 +23,9 @@ This is a minimal Ubuntu 24.04-based container that:
 **Primary Documentation:** See `/run/media/ts/root/home/ts/git/mriiot/otto/kerberos/readme.md` for:
 - Container architecture and lifecycle
 - AD initialization flow (8-step process)
+- Dynamic krb5.conf generation from KERBEROS_* environment variables
 - Keytab refresh mechanism
-- Environment variables and configuration
+- Environment variables and configuration reference
 - Exit codes and troubleshooting
 - Security best practices
 - Docker Compose deployment examples
