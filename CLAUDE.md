@@ -36,6 +36,22 @@ This is a minimal Ubuntu 24.04-based container that:
 
 This file provides instructions for Claude Code for working in the cc-sessions framework.
 
+### Git Merge Strategy
+
+**IMPORTANT: This repository uses fast-forward merges only.**
+
+When merging feature branches to main:
+- Use `git merge --ff-only <branch-name>`
+- DO NOT create merge commits with `--no-ff`
+- Fast-forward merges keep a linear history
+- If fast-forward is not possible, rebase the feature branch first
+
+Example:
+```bash
+git checkout main
+git merge --ff-only feature/my-feature
+```
+
 ## Temporary Files Policy
 
 **NEVER use `/tmp` for temporary files in this repository.**

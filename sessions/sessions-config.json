@@ -43,6 +43,7 @@
     "default_branch": "main",
     "commit_style": "conventional",
     "auto_merge": true,
+    "merge_type": "ff-only",
     "auto_push": true,
     "has_submodules": false
   },

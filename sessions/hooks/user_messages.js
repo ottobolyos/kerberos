@@ -427,10 +427,13 @@ if (!isApiCommand && taskCompletionDetected) {
 
     // Build merge and push instructions based on auto preferences (but override for subtasks)
     let mergeInstruction;
+    const mergeType = CONFIG.git_preferences.merge_type || 'ff-only';
+    const mergeFlag = mergeType === 'no-ff' ? '--no-ff' : '--ff-only';
+
     if (STATE.current_task.file && isSubtask(STATE.current_task.file)) {
         mergeInstruction = 'Do not merge yet - subtask in directory task';
     } else if (CONFIG.git_preferences.auto_merge) {
-        mergeInstruction = `Merge into ${CONFIG.git_preferences.default_branch}`;
+        mergeInstruction = `Merge into ${CONFIG.git_preferences.default_branch} using fast-forward (git merge ${mergeFlag})`;
     } else {
         mergeInstruction = `Ask user if they want to merge into ${CONFIG.git_preferences.default_branch}`;
     }

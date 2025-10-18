@@ -61,6 +61,15 @@ sessions mode discussion
 
 The system has automated protocols for task creation, startup, completion, and context compaction. When loaded, follow the protocol instructions. The user activates these with trigger phrases - you don't need to manage this.
 
+## Git Merge Strategy
+
+**This repository uses fast-forward merges only.**
+
+When merging feature branches:
+- Use `git merge --ff-only <branch-name>`
+- DO NOT create merge commits with `--no-ff`
+- Keeps linear history without merge commit noise
+
 ## Temporary Files Policy
 
 **CRITICAL: NEVER use `/tmp` for temporary files.**

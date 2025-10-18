@@ -462,6 +462,15 @@ function handleGitCommand(args, jsonOutput = false, fromSlash = false) {
                 config.git_preferences.auto_merge = ['true', 'yes', '1', 'auto'].includes(value.toLowerCase());
             }
 
+        } else if (key === 'merge_type') {
+            if (!['ff-only', 'no-ff'].includes(value)) {
+                if (fromSlash) {
+                    throw new Error(`Invalid value '${value}' for merge_type\nValid options: ff-only (fast-forward only) or no-ff (create merge commit)\n\nUse '/sessions config git help' for more info`);
+                }
+                throw new Error(`Invalid merge_type: ${value}. Valid options: ff-only, no-ff`);
+            }
+            config.git_preferences.merge_type = value;
+
         } else if (['push', 'auto_push'].includes(key)) {
             if (fromSlash) {
                 if (value === 'auto') {
@@ -519,6 +528,7 @@ function handleGitShow(jsonOutput = false) {
                 default_branch: gitPrefs.default_branch,
                 commit_style: getValue(gitPrefs.commit_style),
                 auto_merge: gitPrefs.auto_merge,
+                merge_type: gitPrefs.merge_type || 'ff-only',
                 auto_push: gitPrefs.auto_push,
                 has_submodules: gitPrefs.has_submodules,
             }
@@ -531,6 +541,7 @@ function handleGitShow(jsonOutput = false) {
         `  Default Branch: ${gitPrefs.default_branch}`,
         `  Commit Style: ${getValue(gitPrefs.commit_style)}`,
         `  Auto Merge: ${gitPrefs.auto_merge}`,
+        `  Merge Type: ${gitPrefs.merge_type || 'ff-only'}`,
         `  Auto Push: ${gitPrefs.auto_push}`,
         `  Has Submodules: ${gitPrefs.has_submodules}`,
     ];
@@ -542,14 +553,15 @@ function formatGitHelp() {
     const lines = [
         "Git Preference Commands:",
         "",
-        "  /sessions config git show                - Display git preferences",
-        "  /sessions config git add <ask|all>       - Set staging behavior",
-        "  /sessions config git branch <name>       - Set default branch",
-        "  /sessions config git commit <style>      - Set commit style",
+        "  /sessions config git show                    - Display git preferences",
+        "  /sessions config git add <ask|all>           - Set staging behavior",
+        "  /sessions config git branch <name>           - Set default branch",
+        "  /sessions config git commit <style>          - Set commit style",
         "    Styles: conventional, simple, detailed",
-        "  /sessions config git merge <auto|ask>    - Set merge behavior",
-        "  /sessions config git push <auto|ask>     - Set push behavior",
-        "  /sessions config git repo <super|mono>   - Set repository type"
+        "  /sessions config git merge <auto|ask>        - Set merge behavior",
+        "  /sessions config git merge_type <ff-only|no-ff> - Set merge type (fast-forward or merge commit)",
+        "  /sessions config git push <auto|ask>         - Set push behavior",
+        "  /sessions config git repo <super|mono>       - Set repository type"
     ];
     return lines.join('\n');
 }
@@ -561,6 +573,7 @@ function formatGitMissingValue(key) {
         'branch': "Missing branch name\nUsage: /sessions config git branch <name>\n\nExample: /sessions config git branch main",
         'commit': "Missing commit style\nValid styles: conventional, simple, detailed\n\nUsage: /sessions config git commit <style>",
         'merge': "Missing merge preference\nOptions: auto (merge automatically) or ask (prompt first)\n\nUsage: /sessions config git merge <auto|ask>",
+        'merge_type': "Missing merge type\nOptions: ff-only (fast-forward only) or no-ff (create merge commit)\n\nUsage: /sessions config git merge_type <ff-only|no-ff>",
         'push': "Missing push preference\nOptions: auto (push automatically) or ask (prompt first)\n\nUsage: /sessions config git push <auto|ask>",
         'repo': "Missing repository type\nOptions: super (has submodules) or mono (single repo)\n\nUsage: /sessions config git repo <super|mono>"
     };
