@@ -387,6 +387,14 @@ if (!isApiCommand && taskCompletionDetected) {
         }));
     }
 
+    // Add todo to delete feature branch after successful push (unless it's a directory task with incomplete subtasks)
+    if (STATE.current_task.branch && !(STATE.current_task.file && isSubtask(STATE.current_task.file))) {
+        todos.push(new CCTodo({
+            content: 'Delete feature branch after successful merge and push',
+            activeForm: 'Deleting feature branch'
+        }));
+    }
+
     // Load and compose protocol based on config
     let protocolContent = loadProtocolFile('task-completion/task-completion.md');
 

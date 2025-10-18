@@ -28,3 +28,8 @@
 
    Your choice:
    ```
+
+5. Delete the feature branch after successful push:
+   ```bash
+   git branch -d <feature-branch-name>
+   ```
