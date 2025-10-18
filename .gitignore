@@ -44,7 +44,12 @@ $RECYCLE.BIN/
 /.claude/hooks/__pycache__/
 /.claude/settings.local.json
 /.claude/state/
+/sessions/.archived/
+/sessions/package.json
+/sessions/sessions-state.json
 /sessions/tasks/
+/sessions/tasks/indexes/
+/sessions/transcripts/
 Icon
 Network Trash Folder
 Temporary Items
@@ -53,9 +58,6 @@ Thumbs.db:encryptable
 [Dd]esktop.ini
 ehthumbs.db
 ehthumbs_vista.db
-sessions/.archived/
-sessions/package.json
-sessions/sessions-state.json
-sessions/transcripts/
 
 !/sessions/tasks/TEMPLATE.md
+!/sessions/tasks/indexes/INDEX_TEMPLATE.md

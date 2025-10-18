@@ -21,12 +21,12 @@ set -euo pipefail
 
 echo "$(date): Starting keytab refresh"
 
-if [ -z "${AD_ADMIN_PASS-}" ] || [ -z "${AD_ADMIN_USER-}" ]; then
-	echo "$(date): ERROR: AD_ADMIN_PASS and AD_ADMIN_USER must be defined" 1>&2
+if [ -z "${KERBEROS_ADMIN_PASSWORD-}" ] || [ -z "${KERBEROS_ADMIN_USER-}" ]; then
+	echo "$(date): ERROR: KERBEROS_ADMIN_PASSWORD and KERBEROS_ADMIN_USER must be defined" 1>&2
 	exit 1
 fi
 
-if ! net ads keytab create -U"${AD_ADMIN_USER}%${AD_ADMIN_PASS}"; then
+if ! net ads keytab create -U"${KERBEROS_ADMIN_USER}%${KERBEROS_ADMIN_PASSWORD}"; then
 	echo "$(date): ERROR: Failed to refresh keytab" 1>&2
 	exit 1
 fi

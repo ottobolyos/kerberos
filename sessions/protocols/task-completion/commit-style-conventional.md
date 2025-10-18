@@ -6,3 +6,5 @@ Use branch-prefix format for your commit message:
   - `feature: add protocol startup-load command`
   - `fix: remove unnecessary repository check`
   - `refactor: simplify task creation todos`
+
+**IMPORTANT**: Do NOT include Claude Code attribution or Co-Authored-By lines in commit messages.

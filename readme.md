@@ -26,9 +26,11 @@ On first startup (when `/.initialized` marker file doesn't exist), the container
 
 #### 1. Environment Variable Validation
 Checks for three required environment variables:
-- `AD_ADMIN_USER`: Active Directory admin username
-- `AD_ADMIN_PASS`: Password for the AD admin user
-- `SAMBA_GLOBAL_CONFIG_realm`: The AD realm to join (e.g., EXAMPLE.COM)
+- `KERBEROS_ADMIN_USER`: Active Directory admin username
+- `KERBEROS_ADMIN_PASSWORD`: Password for the AD admin user
+- `KERBEROS_REALM`: The AD realm to join (e.g., EXAMPLE.COM)
+
+Additionally, `KERBEROS_REALM` is used to dynamically generate `/etc/krb5.conf` before initialization begins.
 
 **Exit Code:** 2 if any required variables are missing
 
@@ -110,7 +112,7 @@ Active Directory rotates machine account passwords every 30 days by default. The
 **Schedule**: Every 7 days (4x safety margin before 30-day rotation)
 
 **Steps:**
-1. **Environment Validation**: Verifies `AD_ADMIN_USER` and `AD_ADMIN_PASS` are defined
+1. **Environment Validation**: Verifies `KERBEROS_ADMIN_USER` and `KERBEROS_ADMIN_PASSWORD` are defined
 2. **Keytab Recreation**: Executes `net ads keytab create` to regenerate the keytab with current machine account keys
 3. **Verification**: Lists keytab contents and logs success
 
@@ -125,9 +127,36 @@ All output is logged to `/var/log/keytab-refresh.log` via cron redirection.
 #### Required (for initialization and refresh)
 | Variable | Description | Format |
 |----------|-------------|--------|
-| `AD_ADMIN_USER` | Active Directory administrator username | `username` or `domain\username` |
-| `AD_ADMIN_PASS` | Password for the AD administrator account | Plain text password |
-| `SAMBA_GLOBAL_CONFIG_realm` | AD realm/domain name | Uppercase (e.g., `EXAMPLE.COM`) |
+| `KERBEROS_ADMIN_USER` | Active Directory administrator username | `username` or `domain\username` |
+| `KERBEROS_ADMIN_PASSWORD` | Password for the AD administrator account | Plain text password |
+| `KERBEROS_REALM` | AD realm/domain name | Uppercase (e.g., `EXAMPLE.COM`) |
+
+#### Kerberos Configuration (krb5.conf)
+
+The container dynamically generates `/etc/krb5.conf` from environment variables during startup. This eliminates the need for bind-mounting configuration files and enables proper persistence via Docker volumes.
+
+##### Required
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `KERBEROS_REALM` | Active Directory realm (uppercase) | `EXAMPLE.COM` |
+
+##### Optional (with defaults)
+| Variable | Description | Default | Example |
+|----------|-------------|---------|---------|
+| `KERBEROS_DOMAIN` | DNS domain name (lowercase) | Lowercase version of KERBEROS_REALM | `example.com` |
+| `KERBEROS_KDC_SERVERS` | Space-separated KDC server list | Auto-discovered via DNS | `dc1.example.com dc2.example.com` |
+| `KERBEROS_TICKET_LIFETIME` | Kerberos ticket lifetime | `24h` | `12h` |
+| `KERBEROS_RENEW_LIFETIME` | Ticket renewal lifetime | `7d` | `30d` |
+| `KERBEROS_DNS_LOOKUP_KDC` | Use DNS to locate KDCs | `true` | `false` |
+| `KERBEROS_DNS_LOOKUP_REALM` | Use DNS to locate realm | `false` | `true` |
+| `KERBEROS_FORWARDABLE` | Allow ticket forwarding | `true` | `false` |
+| `KERBEROS_RDNS` | Enable reverse DNS lookups | `false` | `true` |
+
+**Important Notes:**
+- The configuration file is regenerated on every container start, ensuring consistency with environment variables
+- If KDC servers are not specified, they will be auto-discovered via DNS SRV records
+- Manual modifications to `/etc/krb5.conf` will be lost on restart - use environment variables instead
+- When using volume mounts for `/etc/krb5.conf`, use named volumes (not bind mounts) to avoid inode locking issues
 
 #### Optional (for host DNS registration)
 | Variable | Description | Format |
@@ -253,14 +282,15 @@ The Dockerfile defines the following startup process:
 
 ## Persistence Considerations
 
-For the container to persist AD membership across restarts, the following should be preserved (via volumes or persistent container):
+For the container to persist AD membership across restarts, the following should be preserved via named volumes:
 
-- `/.initialized` - Initialization marker
-- `/etc/krb5.keytab` - Authentication keys
-- `/etc/krb5.conf` - Kerberos configuration
-- `/var/lib/sss/db/` - SSSD cache
-- `/var/lib/samba/private/` - Samba secrets
-- Root crontab - Refresh schedule
+- `/.initialized` - Initialization marker (prevents re-joining AD)
+- `/etc/krb5.keytab` - Authentication keys (the critical artifact)
+- `/etc/krb5.conf` - Kerberos configuration (generated from env vars, then potentially modified by realmd)
+- `/var/lib/samba/private/` - Samba machine secrets and trust relationships
+- `/var/lib/sss/db/` - SSSD cache databases
+
+**Note:** The root crontab is recreated during initialization and doesn't need persistence.
 
 ### Why Persistence Matters
 
@@ -280,47 +310,68 @@ For the container to persist AD membership across restarts, the following should
 
 **Recommended approach using named volumes:**
 
+**Minimal configuration (with DNS auto-discovery):**
 ```yaml
 services:
   kerberos:
     image: your-kerberos-image:latest
     environment:
-      AD_ADMIN_USER: "admin"
-      AD_ADMIN_PASS: "password"
-      SAMBA_GLOBAL_CONFIG_realm: "EXAMPLE.COM"
+      KERBEROS_ADMIN_USER: "admin"
+      KERBEROS_ADMIN_PASSWORD: "password"
+      KERBEROS_REALM: "EXAMPLE.COM"
+      # KERBEROS_DOMAIN defaults to "example.com" (lowercase realm)
+      # KERBEROS_KDC_SERVERS will be auto-discovered via DNS
     volumes:
       # Persist AD membership state
-      - kerberos-data:/var/lib/samba/private
-      - kerberos-sssd:/var/lib/sss/db
-      - kerberos-krb5:/etc/krb5.conf
-      - kerberos-keytab:/etc/krb5.keytab
       - kerberos-init:/.initialized
+      - kerberos-keytab:/etc/krb5.keytab
+      - kerberos-krb5-conf:/etc/krb5.conf
+      - kerberos-samba-data:/var/lib/samba/private
+      - kerberos-sssd:/var/lib/sss/db
 
 volumes:
-  kerberos-data:
-  kerberos-sssd:
-  kerberos-krb5:
-  kerberos-keytab:
   kerberos-init:
+  kerberos-keytab:
+  kerberos-krb5-conf:
+  kerberos-samba-data:
+  kerberos-sssd:
 ```
 
-**Alternative using bind mounts:**
-
+**Explicit configuration (with KDC servers specified):**
 ```yaml
 services:
   kerberos:
     image: your-kerberos-image:latest
     environment:
-      AD_ADMIN_USER: "admin"
-      AD_ADMIN_PASS: "password"
-      SAMBA_GLOBAL_CONFIG_realm: "EXAMPLE.COM"
+      KERBEROS_ADMIN_USER: "admin"
+      KERBEROS_ADMIN_PASSWORD: "password"
+      KERBEROS_REALM: "EXAMPLE.COM"
+      KERBEROS_DOMAIN: "example.local"
+      KERBEROS_KDC_SERVERS: "dc1.example.local dc2.example.local"
+      # Optional: Override defaults
+      # KERBEROS_TICKET_LIFETIME: "12h"
+      # KERBEROS_RENEW_LIFETIME: "30d"
     volumes:
-      - ./kerberos-data/samba:/var/lib/samba/private
-      - ./kerberos-data/sssd:/var/lib/sss/db
-      - ./kerberos-data/krb5.conf:/etc/krb5.conf
-      - ./kerberos-data/krb5.keytab:/etc/krb5.keytab
-      - ./kerberos-data/.initialized:/.initialized
+      # Persist AD membership state
+      - kerberos-init:/.initialized
+      - kerberos-keytab:/etc/krb5.keytab
+      - kerberos-krb5-conf:/etc/krb5.conf
+      - kerberos-samba-data:/var/lib/samba/private
+      - kerberos-sssd:/var/lib/sss/db
+
+volumes:
+  kerberos-init:
+  kerberos-keytab:
+  kerberos-krb5-conf:
+  kerberos-samba-data:
+  kerberos-sssd:
 ```
+
+**Important Notes:**
+- Use **named volumes** (shown above) instead of bind mounts for `/etc/krb5.conf`
+- Bind-mounting single files can cause inode locking issues that prevent atomic rename operations
+- The `krb5.conf` file is dynamically generated from `KERBEROS_*` environment variables
+- All state files must persist for the container to maintain AD membership across recreations
 
 **Note**: The root crontab is stored in `/var/spool/cron/crontabs/root` and typically doesn't need explicit persistence as it's recreated during initialization.
 
@@ -455,3 +506,17 @@ nc -zv dc.example.com 53
 2. Check keytab contents: `klist -k /etc/krb5.keytab`
 3. Test AD membership: `net ads testjoin`
 4. Check service configuration for correct principal names
+
+### krb5.conf keeps regenerating and losing custom changes
+
+**This is expected behavior.** The container regenerates `/etc/krb5.conf` from environment variables on every start to ensure consistency.
+
+**To customize the configuration:**
+1. Set the appropriate `KERBEROS_*` environment variables (see Configuration Reference)
+2. Restart the container for changes to take effect
+
+**Why this approach:**
+- Configuration always matches your environment variables
+- No drift between intended and actual configuration
+- Eliminates bind mount inode locking issues that prevent atomic file operations
+- Simpler deployment without maintaining separate config files

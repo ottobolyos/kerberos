@@ -6,13 +6,15 @@ Use branch-prefix format with comprehensive body:
 - Example:
   ```
   feature: complete sessions migration
-  
+
   Migrated local hook configuration to use cc-sessions package
   exclusively. This eliminates dual maintenance and ensures all
   customizations are preserved through configuration.
-  
+
   - Created protocol startup-load command for task loading
-  - Removed modified add pattern (impractical)  
+  - Removed modified add pattern (impractical)
   - Fixed protocol/todo mismatches
   - Updated all import paths for symlinked setup
   ```
+
+**IMPORTANT**: Do NOT include Claude Code attribution or Co-Authored-By lines in commit messages.
