@@ -50,6 +50,7 @@ RUN apt-get update && apt-get install -y \
     winbind \
     samba-common-bin \
     cron \
+    dnsutils \
     && rm -rf /var/lib/apt/lists/*
 
 # Create directory for Samba private data

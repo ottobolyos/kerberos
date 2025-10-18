@@ -48,7 +48,17 @@ Joins the AD realm using `realm join`, which:
 - Sets up SSSD (System Security Services Daemon) for user/group resolution
 - Establishes trust relationship with the domain
 
-**Exit Code:** 4 if realm join fails
+**Pre-flight Checks (before realm join):**
+- **DNS Verification**: Validates forward DNS lookup for the realm, displaying detailed diagnostics on failure (nslookup output, configured nameservers)
+- **Credential Validation**: Tests authentication via `kinit` before modifying system configuration, ensuring admin credentials are valid
+
+**Enhanced Error Diagnostics:**
+- Captures verbose output from `realm join` command using `-v` flag
+- On failure, displays combined stdout/stderr output
+- Includes recent realmd service logs via `journalctl` for deeper troubleshooting
+- No silent failures - all errors propagate with specific diagnostic information
+
+**Exit Code:** 3 for DNS resolution failures, 4 for credential validation or realm join failures
 
 #### 4. Domain Join (ADS Protocol)
 Performs Samba-specific AD joining via `net ads join`, which:
@@ -174,8 +184,8 @@ The container dynamically generates `/etc/krb5.conf` from environment variables 
 | 0 | Success |
 | 1 | Unknown error |
 | 2 | Required environment variables not defined |
-| 3 | Failed to discover realm (DNS/network issues, wrong realm name) |
-| 4 | Failed to join realm (authentication issues, AD connectivity) |
+| 3 | Failed to discover realm or DNS verification failed (DNS/network issues, wrong realm name) |
+| 4 | Failed credential validation or realm join (invalid credentials, authentication issues, AD connectivity) |
 | 5 | Failed to join domain (ADS protocol issues) |
 | 6 | Failed to register DNS entry (AD DNS service issues) |
 | 7 | Failed to create keytab (permission issues, AD configuration) |
@@ -199,6 +209,7 @@ The container installs only minimal AD integration packages:
 | `krb5-user` | Kerberos client utilities (kinit, klist, kdestroy) |
 | `winbind` | Samba's NT domain client service for Unix/AD integration |
 | `samba-common-bin` | Common Samba utilities including the `net` command |
+| `dnsutils` | DNS query tools (nslookup, dig) for pre-flight DNS verification |
 | `cron` | Standard cron daemon for scheduling keytab refresh |
 
 ### File Locations
@@ -388,6 +399,25 @@ set -euo pipefail
 
 This ensures failures are caught early and exit codes accurately reflect the failure point.
 
+### Enhanced Error Diagnostics
+
+The entrypoint script implements comprehensive error diagnostics:
+
+**Pre-flight Validation:**
+- DNS forward lookup verification before realm join attempts
+- Credential validation via `kinit` before modifying system configuration
+- Both checks provide detailed error output to help identify root causes
+
+**Verbose Error Capture:**
+- Realm join operations use verbose mode (`-v` flag) for detailed output
+- Combined stdout/stderr capture preserves all diagnostic information
+- Recent realmd service logs included via `journalctl` when available
+
+**No Silent Failures:**
+- Removed all error suppression patterns (`|| true`)
+- All errors properly propagate with specific exit codes
+- Error messages include contextual information (DNS servers, Kerberos errors, realm output)
+
 ## Security Considerations
 
 1. **Minimal Attack Surface**: Only AD client packages installed, no full Samba server
@@ -457,13 +487,26 @@ echo "your-password" | docker secret create ad_admin_password -
 ## Troubleshooting
 
 ### Container fails to initialize
-1. Check exit code to identify failure point (see Exit Codes section)
-2. Verify environment variables are correctly set
-3. Check DNS resolution for the AD realm
-4. Verify network connectivity to domain controllers
-5. Confirm admin credentials are valid
+1. **Check exit code** to identify failure point (see Exit Codes section)
+2. **Review container logs** - the entrypoint script now provides detailed diagnostic output:
+   - DNS verification results with nslookup output and configured nameservers
+   - Credential validation errors with specific Kerberos error messages
+   - Verbose realm join output from `realm join -v`
+   - Recent realmd service logs via `journalctl` (when available)
+3. Verify environment variables are correctly set
+4. Check DNS resolution for the AD realm
+5. Verify network connectivity to domain controllers
+6. Confirm admin credentials are valid
 
-**DNS Verification Commands:**
+**Improved Error Diagnostics (as of latest version):**
+
+The container now performs pre-flight checks and provides comprehensive error output:
+- **DNS failures**: Shows nslookup results and `/etc/resolv.conf` nameserver configuration
+- **Credential failures**: Displays specific `kinit` error messages before attempting realm join
+- **Realm join failures**: Captures verbose output and includes recent realmd logs
+- **No silent failures**: All errors propagate with detailed diagnostic information
+
+**DNS Verification Commands (for manual troubleshooting):**
 ```bash
 # Check if the AD realm resolves
 nslookup EXAMPLE.COM

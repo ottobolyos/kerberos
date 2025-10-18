@@ -14,14 +14,15 @@
 # - coreutils (cat, touch)
 # - realmd (realm)
 # - samba-common-bin (net)
-# - krb5-user (klist)
+# - krb5-user (klist, kinit, kdestroy)
+# - dnsutils (nslookup)
 #
 # Exit codes:
 # 0 - Success
 # 1 - Unknown error
 # 2 - Required variables not defined
-# 3 - Failed to discover realm
-# 4 - Failed to join realm
+# 3 - Failed to discover realm or DNS verification failed
+# 4 - Failed credential validation or realm join
 # 5 - Failed to join domain
 # 6 - Failed to register DNS entry
 # 7 - Failed to create keytab
@@ -142,19 +143,85 @@ if [ ! -f "$INITIALIZED" ]; then
 		exit 3
 	fi
 
-	echo ">> AD: Joining the ${KERBEROS_REALM} realm ..."
-	if ! realm_join_result="$(realm --install / join "${KERBEROS_REALM}" -U "${KERBEROS_ADMIN_USER}" <<< "${KERBEROS_ADMIN_PASSWORD}")"; then
-		if [ "$realm_join_result" = 'Already joined.' ]; then
-			:
-		fi
+	# DNS verification - helps distinguish DNS issues from authentication issues
+	echo ">> AD: Verifying DNS resolution for ${KERBEROS_REALM} ..."
+	if dns_result=$(nslookup "${KERBEROS_REALM}" 2>&1); then
+		echo "   Resolved successfully"
+		echo "${dns_result}" | grep -A 2 "^Name:"
+	else
+		echo "ERROR: AD: Cannot resolve ${KERBEROS_REALM} via DNS" 1>&2
+		echo "       DNS lookup output:" 1>&2
+		echo "${dns_result}" | sed 's/^/       /' 1>&2
+		echo "" 1>&2
+		echo "       Configured DNS servers:" 1>&2
+		grep -E '^nameserver' /etc/resolv.conf | sed 's/^/       /' 1>&2 || echo "       (none found)" 1>&2
+		exit 3
 	fi
-	realm --install / join "${KERBEROS_REALM}" -U "${KERBEROS_ADMIN_USER}" <<< "${KERBEROS_ADMIN_PASSWORD}" || true
 
-	# Check whether we have successfully joined the realm
-	if ! is_realm_configured="$(realm --install / -v list "${KERBEROS_REALM}" 2> /dev/null | grep -Po 'configured: \K.*')" || [ "$is_realm_configured" = 'no' ]; then
-		echo "ERROR: AD: Failed to join the ${KERBEROS_REALM} realm." 1>&2
+	# Credential validation - test authentication before attempting realm join
+	echo ">> AD: Validating credentials with Kerberos KDC ..."
+	if ! kinit_output="$(echo "${KERBEROS_ADMIN_PASSWORD}" | kinit "${KERBEROS_ADMIN_USER}@${KERBEROS_REALM}" 2>&1)"; then
+		echo "ERROR: AD: Credential validation failed" 1>&2
+		echo "       Kerberos error: ${kinit_output}" 1>&2
+		echo "       Check that KERBEROS_ADMIN_USER and KERBEROS_ADMIN_PASSWORD are correct" 1>&2
 		exit 4
 	fi
+	echo ">> AD: Credentials validated successfully"
+
+	# Clean up the test ticket
+	if ! kdestroy 2>/dev/null; then
+		echo "   Note: No credential cache to clean up (this is fine)" 1>&2
+	fi
+
+	echo ">> AD: Joining the ${KERBEROS_REALM} realm ..."
+
+	# Capture both stdout and stderr with verbose output
+	if realm_join_output="$(realm --install / -v join "${KERBEROS_REALM}" -U "${KERBEROS_ADMIN_USER}" <<< "${KERBEROS_ADMIN_PASSWORD}" 2>&1)"; then
+		echo ">> AD: Realm join succeeded"
+		echo "${realm_join_output}"
+	else
+		realm_join_exit_code=$?
+
+		# Check if the "failure" was actually "Already joined" (which is acceptable)
+		if echo "${realm_join_output}" | grep -q "Already joined"; then
+			echo ">> AD: Already joined to realm (continuing)"
+		else
+			# Real failure - dump diagnostics
+			echo "ERROR: AD: Realm join failed (exit code ${realm_join_exit_code})" 1>&2
+			echo "       Realm join output:" 1>&2
+			echo "${realm_join_output}" 1>&2
+			echo "" 1>&2
+			echo "       Recent realmd logs:" 1>&2
+			if command -v journalctl &>/dev/null; then
+				journalctl -u realmd --no-pager -n 20 1>&2 || echo "       (realmd logs unavailable)" 1>&2
+			else
+				echo "       (journalctl not available in this container)" 1>&2
+			fi
+			exit 4
+		fi
+	fi
+
+	# Verify realm is properly configured
+	echo ">> AD: Verifying realm configuration ..."
+	realm_list_output="$(realm --install / list "${KERBEROS_REALM}" 2>&1)"
+	realm_list_exit_code=$?
+
+	if [ "$realm_list_exit_code" != 0 ]; then
+		echo "ERROR: AD: Cannot query realm configuration" 1>&2
+		echo "       ${realm_list_output}" 1>&2
+		exit 4
+	fi
+
+	is_realm_configured="$(echo "${realm_list_output}" | grep -Po 'configured: \K.*')"
+
+	if [ "$is_realm_configured" = 'no' ]; then
+		echo "ERROR: AD: Realm is not configured" 1>&2
+		echo "       Full realm status:" 1>&2
+		echo "${realm_list_output}" 1>&2
+		exit 4
+	fi
+
+	echo ">> AD: Realm configuration verified (configured: ${is_realm_configured})"
 
 	echo ">> AD: Joining the ${KERBEROS_REALM,,} domain ..."
 	net ads join -U"${KERBEROS_ADMIN_USER}%${KERBEROS_ADMIN_PASSWORD}"
