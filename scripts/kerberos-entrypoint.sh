@@ -40,7 +40,8 @@ echo '##########################################################################
 
 generate_krb5_conf() {
 	local realm="${KERBEROS_REALM:-}"
-	local domain="${KERBEROS_DOMAIN:-$(echo "$realm" | tr '[:upper:]' '[:lower:]')}"
+	# Default domain to lowercase realm if not specified (e.g., EXAMPLE.COM -> example.com)
+	local domain="${KERBEROS_DOMAIN:-${realm,,}}"
 	local kdc_servers="${KERBEROS_KDC_SERVERS:-}"
 
 	# Validate required variables
@@ -100,13 +101,22 @@ generate_krb5_conf() {
 
 		# Add each KDC server
 		for kdc in $kdc_servers; do
-			echo "		kdc = $kdc" >> /etc/krb5.conf
+			printf '\t\t\tkdc = %s\n' "$kdc" >> /etc/krb5.conf
 		done
 
-		echo "	}" >> /etc/krb5.conf
+		cat >> /etc/krb5.conf <<-EOF
+			}
+		EOF
 	fi
 
 	chmod 644 /etc/krb5.conf
+
+	# Validate generated configuration
+	if [[ ! -s /etc/krb5.conf ]]; then
+		echo " ! ERROR: Generated krb5.conf is empty or missing" >&2
+		return 1
+	fi
+
 	echo " + krb5.conf generated successfully"
 }
 
@@ -120,6 +130,7 @@ if [ ! -f "$INITIALIZED" ]; then
 
 	# Check whether the required variables are defined
 	if [ -z "${KERBEROS_ADMIN_PASSWORD-}" ] || [ -z "${KERBEROS_ADMIN_USER-}" ] || [ -z "${KERBEROS_REALM-}" ]; then
+		# shellcheck disable=SC2016 # Single quotes intentional to show literal variable names in error message
 		echo 'ERROR: AD: $KERBEROS_ADMIN_PASSWORD, $KERBEROS_ADMIN_USER and $KERBEROS_REALM must be defined.' 1>&2
 		exit 2
 	fi
@@ -140,9 +151,7 @@ if [ ! -f "$INITIALIZED" ]; then
 	realm --install / join "${KERBEROS_REALM}" -U "${KERBEROS_ADMIN_USER}" <<< "${KERBEROS_ADMIN_PASSWORD}" || true
 
 	# Check whether we have successfully joined the realm
-	is_realm_configured="$(realm --install / -v list "${KERBEROS_REALM}" 2> /dev/null | grep -Po 'configured: \K.*')"
-
-	if [ "$?" != 0 ] || [ "$is_realm_configured" = 'no' ]; then
+	if ! is_realm_configured="$(realm --install / -v list "${KERBEROS_REALM}" 2> /dev/null | grep -Po 'configured: \K.*')" || [ "$is_realm_configured" = 'no' ]; then
 		echo "ERROR: AD: Failed to join the ${KERBEROS_REALM} realm." 1>&2
 		exit 4
 	fi

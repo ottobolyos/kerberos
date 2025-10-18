@@ -60,3 +60,13 @@ sessions mode discussion
 ## Workflow Protocols
 
 The system has automated protocols for task creation, startup, completion, and context compaction. When loaded, follow the protocol instructions. The user activates these with trigger phrases - you don't need to manage this.
+
+## Temporary Files Policy
+
+**CRITICAL: NEVER use `/tmp` for temporary files.**
+
+Always use repository-local temporary directories:
+- `sessions/temp/` - For general temporary files
+- `sessions/tasks/[task-name]/temp/` - For task-specific temporary files
+
+Clean up temporary files/directories when no longer needed. This keeps all artifacts contained within the repository and avoids system-wide conflicts.

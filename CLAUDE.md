@@ -33,3 +33,21 @@ This is a minimal Ubuntu 24.04-based container that:
 @sessions/CLAUDE.sessions.md
 
 This file provides instructions for Claude Code for working in the cc-sessions framework.
+
+## Temporary Files Policy
+
+**NEVER use `/tmp` for temporary files in this repository.**
+
+When you need to create temporary files during development, testing, or agent operations:
+
+1. **Use `sessions/temp/` directory** - Create this directory if it doesn't exist
+2. **Use task-specific temp directories** - Create `sessions/tasks/[task-name]/temp/` for task-specific temporary files
+3. **Clean up after yourself** - Remove temporary files/directories when no longer needed
+4. **Add to .gitignore** - Ensure temp directories are in .gitignore (already configured)
+
+**Rationale:**
+- `/tmp` is system-wide and can conflict with other processes
+- Repository-local temp directories keep all artifacts contained
+- Easier to track and clean up temporary files
+- Avoids permission issues in containerized environments
+- Makes testing and debugging more predictable

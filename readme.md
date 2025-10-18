@@ -404,21 +404,21 @@ services:
   kerberos:
     image: your-kerberos-image:latest
     environment:
-      AD_ADMIN_USER: "admin"
-      SAMBA_GLOBAL_CONFIG_realm: "EXAMPLE.COM"
+      KERBEROS_ADMIN_USER: "admin"
+      KERBEROS_REALM: "EXAMPLE.COM"
     secrets:
-      - ad_admin_password
+      - kerberos_admin_password
     # Map secret to environment variable expected by the container
     entrypoint:
       - /bin/bash
       - -c
       - |
-        export AD_ADMIN_PASS=$(cat /run/secrets/ad_admin_password)
+        export KERBEROS_ADMIN_PASSWORD=$(cat /run/secrets/kerberos_admin_password)
         exec /usr/local/bin/entrypoint.sh
 
 secrets:
-  ad_admin_password:
-    file: ./secrets/ad_admin_password.txt
+  kerberos_admin_password:
+    file: ./secrets/kerberos_admin_password.txt
 ```
 
 **Or using Docker Swarm secrets:**
@@ -428,19 +428,19 @@ services:
   kerberos:
     image: your-kerberos-image:latest
     environment:
-      AD_ADMIN_USER: "admin"
-      SAMBA_GLOBAL_CONFIG_realm: "EXAMPLE.COM"
+      KERBEROS_ADMIN_USER: "admin"
+      KERBEROS_REALM: "EXAMPLE.COM"
     secrets:
-      - ad_admin_password
+      - kerberos_admin_password
     entrypoint:
       - /bin/bash
       - -c
       - |
-        export AD_ADMIN_PASS=$(cat /run/secrets/ad_admin_password)
+        export KERBEROS_ADMIN_PASSWORD=$(cat /run/secrets/kerberos_admin_password)
         exec /usr/local/bin/entrypoint.sh
 
 secrets:
-  ad_admin_password:
+  kerberos_admin_password:
     external: true
 ```
 
