@@ -1,5 +1,0 @@
-
-[2025-10-18T17:48:23.515Z] EMERGENCY STOP TRIGGERED
-  Prompt: `  □ Inconsistent indentation in generated [realms] section - Mixing heredoc and echo statements creates formatting inconsistency (spaces/tabs mismatch)` tell me more ... `  □ Outdated variable names ...
-  discussion_phrase_detected: true
-  Trigger phrases: ["SILENCE","discuss"]

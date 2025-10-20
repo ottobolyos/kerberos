@@ -45,6 +45,7 @@ $RECYCLE.BIN/
 /.claude/settings.local.json
 /.claude/state/
 /sessions/.archived/
+/sessions/mode-revert-debug.log
 /sessions/package.json
 /sessions/sessions-state.json
 /sessions/tasks/

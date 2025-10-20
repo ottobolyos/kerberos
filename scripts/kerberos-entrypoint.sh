@@ -29,7 +29,18 @@
 
 set -euo pipefail
 
-INITIALIZED='/.initialized'
+# Set defaults for Kerberos environment variables
+KRB5_KTNAME="${KRB5_KTNAME:-FILE:/etc/krb5.keytab}"
+
+# Define file path variables
+INITIALIZED='/var/lib/kerberos/initialized'
+KRB5_CONFIG_FILE="${KRB5_CONFIG:-/etc/krb5.conf}"
+KRB5_KEYTAB_FILE="${KRB5_KTNAME#FILE:}"
+
+# Ensure all required directories exist
+mkdir -p /var/lib/kerberos
+mkdir -p "$(dirname "$KRB5_CONFIG_FILE")"
+mkdir -p "$(dirname "$KRB5_KEYTAB_FILE")"
 
 echo '################################################################################'
 echo '# Kerberos Container for Shared Authentication'
@@ -59,9 +70,9 @@ generate_krb5_conf() {
 	local forwardable="${KERBEROS_FORWARDABLE:-true}"
 	local rdns="${KERBEROS_RDNS:-false}"
 
-	echo " + Generating /etc/krb5.conf from environment variables"
+	echo " + Generating $KRB5_CONFIG_FILE from environment variables"
 
-	cat > /etc/krb5.conf <<-EOF
+	cat > "$KRB5_CONFIG_FILE" <<-EOF
 		[domain_realm]
 		.$domain = $realm
 		$domain = $realm
@@ -93,7 +104,7 @@ generate_krb5_conf() {
 
 	# Only add [realms] section if KDC servers are explicitly specified
 	if [[ -n "$kdc_servers" ]]; then
-		cat >> /etc/krb5.conf <<-EOF
+		cat >> "$KRB5_CONFIG_FILE" <<-EOF
 
 			[realms]
 			$realm = {
@@ -102,18 +113,18 @@ generate_krb5_conf() {
 
 		# Add each KDC server
 		for kdc in $kdc_servers; do
-			printf '\t\t\tkdc = %s\n' "$kdc" >> /etc/krb5.conf
+			printf '\t\t\tkdc = %s\n' "$kdc" >> "$KRB5_CONFIG_FILE"
 		done
 
-		cat >> /etc/krb5.conf <<-EOF
+		cat >> "$KRB5_CONFIG_FILE" <<-EOF
 			}
 		EOF
 	fi
 
-	chmod 644 /etc/krb5.conf
+	chmod 644 "$KRB5_CONFIG_FILE"
 
 	# Validate generated configuration
-	if [[ ! -s /etc/krb5.conf ]]; then
+	if [[ ! -s "$KRB5_CONFIG_FILE" ]]; then
 		echo " ! ERROR: Generated krb5.conf is empty or missing" >&2
 		return 1
 	fi
@@ -257,7 +268,7 @@ if [ ! -f "$INITIALIZED" ]; then
 	fi
 
 	echo '>> AD: Verifying keytab contents ...'
-	klist -k /etc/krb5.keytab
+	klist -k "$KRB5_KEYTAB_FILE"
 
 	echo '>> AD: Setting up keytab refresh cron job (every 7 days) ...'
 	echo "0 0 */7 * * /usr/local/bin/kerberos-refresh.sh >> /var/log/keytab-refresh.log 2>&1" | crontab -

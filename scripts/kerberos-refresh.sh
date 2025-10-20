@@ -19,6 +19,12 @@
 
 set -euo pipefail
 
+# Set defaults for Kerberos environment variables
+KRB5_KTNAME="${KRB5_KTNAME:-FILE:/etc/krb5.keytab}"
+
+# Define file path variables
+KRB5_KEYTAB_FILE="${KRB5_KTNAME#FILE:}"
+
 echo "$(date): Starting keytab refresh"
 
 if [ -z "${KERBEROS_ADMIN_PASSWORD-}" ] || [ -z "${KERBEROS_ADMIN_USER-}" ]; then
@@ -32,6 +38,6 @@ if ! net ads keytab create -U"${KERBEROS_ADMIN_USER}%${KERBEROS_ADMIN_PASSWORD}"
 fi
 
 echo "$(date): Keytab refreshed successfully"
-klist -k /etc/krb5.keytab
+klist -k "$KRB5_KEYTAB_FILE"
 
 exit 0

@@ -13,6 +13,8 @@
 # Key Features:
 # - Minimal Ubuntu 24.04 base (only AD client packages, not full Samba server)
 # - Dynamic krb5.conf generation from KERBEROS_* environment variables
+# - Standard Kerberos environment variables (KRB5_CONFIG, KRB5_KTNAME) for file locations
+# - Directory-based volume sharing pattern for multi-container deployments
 # - "Join once, maintain forever" pattern with initialization marker
 # - Automated keytab refresh every 7 days via cron
 # - Supports both host and container DNS registration modes
@@ -30,6 +32,10 @@
 # - KERBEROS_DNS_LOOKUP_KDC: Use DNS to locate KDCs (default: true)
 # - KERBEROS_FORWARDABLE: Allow ticket forwarding (default: true)
 # - KERBEROS_RDNS: Enable reverse DNS lookups (default: false)
+#
+# Optional Environment Variables (Standard Kerberos Variables):
+# - KRB5_CONFIG: Path to krb5.conf file (default: /etc/krb5.conf)
+# - KRB5_KTNAME: Keytab location with FILE: prefix (default: FILE:/etc/krb5.keytab)
 #
 # Optional Environment Variables (DNS Registration):
 # - HOST_IP: Docker host IP for DNS registration

@@ -161,12 +161,24 @@ The container dynamically generates `/etc/krb5.conf` from environment variables 
 | `KERBEROS_DNS_LOOKUP_REALM` | Use DNS to locate realm | `false` | `true` |
 | `KERBEROS_FORWARDABLE` | Allow ticket forwarding | `true` | `false` |
 | `KERBEROS_RDNS` | Enable reverse DNS lookups | `false` | `true` |
+| `KRB5_CONFIG` | Custom path for krb5.conf file | `/etc/krb5.conf` | `/etc/krb5/krb5.conf` |
 
 **Important Notes:**
 - The configuration file is regenerated on every container start, ensuring consistency with environment variables
 - If KDC servers are not specified, they will be auto-discovered via DNS SRV records
-- Manual modifications to `/etc/krb5.conf` will be lost on restart - use environment variables instead
-- When using volume mounts for `/etc/krb5.conf`, use named volumes (not bind mounts) to avoid inode locking issues
+- Manual modifications to the krb5.conf file will be lost on restart - use environment variables instead
+- To share krb5.conf between containers (e.g., with Samba containers), set `KRB5_CONFIG=/etc/krb5/krb5.conf` and mount `/etc/krb5/` as a named volume
+- Docker named volumes can only mount to directories, not individual files - use `KRB5_CONFIG` to move krb5.conf into a directory for sharing
+
+#### Optional (for keytab configuration)
+| Variable | Description | Default | Example |
+|----------|-------------|---------|---------|
+| `KRB5_KTNAME` | Custom path for Kerberos keytab (must include FILE: prefix) | `FILE:/etc/krb5.keytab` | `FILE:/etc/krb5/krb5.keytab` |
+
+**Important Notes:**
+- The `KRB5_KTNAME` variable must include the `FILE:` prefix for proper Kerberos functionality
+- To share the keytab between containers, set `KRB5_KTNAME=FILE:/etc/krb5/krb5.keytab` and mount `/etc/krb5/` as a named volume
+- Combined with `KRB5_CONFIG`, both krb5.conf and krb5.keytab can share the same `/etc/krb5/` volume mount
 
 #### Optional (for host DNS registration)
 | Variable | Description | Format |
@@ -219,12 +231,13 @@ The container installs only minimal AD integration packages:
 - `/usr/local/bin/kerberos-refresh.sh`: Keytab refresh script (from `scripts/kerberos-refresh.sh`)
 
 #### State Files
-- `/.initialized`: Marker file indicating completed initialization
-- `/etc/krb5.keytab`: **THE critical authentication artifact** - Kerberos keytab file
-- `/etc/krb5.conf`: Kerberos client configuration (created by realmd)
+- `/var/lib/kerberos/initialized`: Marker file indicating completed initialization
+- `/etc/krb5.keytab`: **THE critical authentication artifact** - Kerberos keytab file (customizable via `KRB5_KTNAME`)
+- `/etc/krb5.conf`: Kerberos client configuration (customizable via `KRB5_CONFIG`)
 - `/var/log/keytab-refresh.log`: Refresh operation logs
 
 #### Persistent Data Directories
+- `/var/lib/kerberos/`: Container state directory (contains initialization marker)
 - `/var/lib/samba/private/`: Samba machine secrets and trust relationships
 - `/var/lib/sss/db/`: SSSD cache databases
 
@@ -295,9 +308,8 @@ The Dockerfile defines the following startup process:
 
 For the container to persist AD membership across restarts, the following should be preserved via named volumes:
 
-- `/.initialized` - Initialization marker (prevents re-joining AD)
-- `/etc/krb5.keytab` - Authentication keys (the critical artifact)
-- `/etc/krb5.conf` - Kerberos configuration (generated from env vars, then potentially modified by realmd)
+- `/var/lib/kerberos/` - Container state directory (contains initialization marker)
+- `/etc/krb5/` - Kerberos configuration and keytab (when using directory-based sharing)
 - `/var/lib/samba/private/` - Samba machine secrets and trust relationships
 - `/var/lib/sss/db/` - SSSD cache databases
 
@@ -315,13 +327,13 @@ For the container to persist AD membership across restarts, the following should
 
 4. **Unnecessary Load**: Hits the domain controllers unnecessarily on every container restart, wasting resources.
 
-5. **The `.initialized` Marker Exists for This Reason**: The entrypoint script explicitly checks for this marker to avoid re-joining on container restart.
+5. **The Initialization Marker Exists for This Reason**: The entrypoint script explicitly checks for this marker to avoid re-joining on container restart.
 
 ### Docker Compose Volume Configuration
 
-**Recommended approach using named volumes:**
+**Recommended approach using directory-based volumes:**
 
-**Minimal configuration (with DNS auto-discovery):**
+**Directory-based configuration (recommended for sharing with other containers):**
 ```yaml
 services:
   kerberos:
@@ -332,23 +344,25 @@ services:
       KERBEROS_REALM: "EXAMPLE.COM"
       # KERBEROS_DOMAIN defaults to "example.com" (lowercase realm)
       # KERBEROS_KDC_SERVERS will be auto-discovered via DNS
+
+      # Use directory-based paths for volume sharing
+      KRB5_CONFIG: "/etc/krb5/krb5.conf"
+      KRB5_KTNAME: "FILE:/etc/krb5/krb5.keytab"
     volumes:
-      # Persist AD membership state
-      - kerberos-init:/.initialized
-      - kerberos-keytab:/etc/krb5.keytab
-      - kerberos-krb5-conf:/etc/krb5.conf
+      # Persist AD membership state using directories
+      - kerberos-state:/var/lib/kerberos
+      - kerberos-config:/etc/krb5
       - kerberos-samba-data:/var/lib/samba/private
       - kerberos-sssd:/var/lib/sss/db
 
 volumes:
-  kerberos-init:
-  kerberos-keytab:
-  kerberos-krb5-conf:
+  kerberos-state:
+  kerberos-config:
   kerberos-samba-data:
   kerberos-sssd:
 ```
 
-**Explicit configuration (with KDC servers specified):**
+**Sharing Kerberos credentials with Samba containers:**
 ```yaml
 services:
   kerberos:
@@ -357,31 +371,71 @@ services:
       KERBEROS_ADMIN_USER: "admin"
       KERBEROS_ADMIN_PASSWORD: "password"
       KERBEROS_REALM: "EXAMPLE.COM"
-      KERBEROS_DOMAIN: "example.local"
-      KERBEROS_KDC_SERVERS: "dc1.example.local dc2.example.local"
-      # Optional: Override defaults
-      # KERBEROS_TICKET_LIFETIME: "12h"
-      # KERBEROS_RENEW_LIFETIME: "30d"
+      KRB5_CONFIG: "/etc/krb5/krb5.conf"
+      KRB5_KTNAME: "FILE:/etc/krb5/krb5.keytab"
     volumes:
-      # Persist AD membership state
-      - kerberos-init:/.initialized
-      - kerberos-keytab:/etc/krb5.keytab
-      - kerberos-krb5-conf:/etc/krb5.conf
+      - kerberos-state:/var/lib/kerberos
+      - kerberos-config:/etc/krb5
+      - kerberos-samba-data:/var/lib/samba/private
+      - kerberos-sssd:/var/lib/sss/db
+
+  samba1:
+    image: your-samba-image:latest
+    environment:
+      # Use the same Kerberos config and keytab
+      KRB5_CONFIG: "/etc/krb5/krb5.conf"
+      KRB5_KTNAME: "FILE:/etc/krb5/krb5.keytab"
+    volumes:
+      # Mount the same Kerberos config volume (read-only recommended)
+      - kerberos-config:/etc/krb5:ro
+    depends_on:
+      - kerberos
+
+  samba2:
+    image: your-samba-image:latest
+    environment:
+      KRB5_CONFIG: "/etc/krb5/krb5.conf"
+      KRB5_KTNAME: "FILE:/etc/krb5/krb5.keytab"
+    volumes:
+      - kerberos-config:/etc/krb5:ro
+    depends_on:
+      - kerberos
+
+volumes:
+  kerberos-state:
+  kerberos-config:
+  kerberos-samba-data:
+  kerberos-sssd:
+```
+
+**Legacy configuration (backward compatible, no sharing):**
+```yaml
+services:
+  kerberos:
+    image: your-kerberos-image:latest
+    environment:
+      KERBEROS_ADMIN_USER: "admin"
+      KERBEROS_ADMIN_PASSWORD: "password"
+      KERBEROS_REALM: "EXAMPLE.COM"
+      # Using default paths (no KRB5_CONFIG or KRB5_KTNAME needed)
+    volumes:
+      # Single-container setup (no sharing)
+      - kerberos-state:/var/lib/kerberos
       - kerberos-samba-data:/var/lib/samba/private
       - kerberos-sssd:/var/lib/sss/db
 
 volumes:
-  kerberos-init:
-  kerberos-keytab:
-  kerberos-krb5-conf:
+  kerberos-state:
   kerberos-samba-data:
   kerberos-sssd:
 ```
 
 **Important Notes:**
-- Use **named volumes** (shown above) instead of bind mounts for `/etc/krb5.conf`
-- Bind-mounting single files can cause inode locking issues that prevent atomic rename operations
-- The `krb5.conf` file is dynamically generated from `KERBEROS_*` environment variables
+- Docker named volumes can only mount to directories, not individual files
+- Use `KRB5_CONFIG` and `KRB5_KTNAME` to move Kerberos files into `/etc/krb5/` for sharing
+- The `KRB5_KTNAME` variable must include the `FILE:` prefix
+- Both krb5.conf and krb5.keytab can share the same `/etc/krb5/` volume mount
+- Mount the shared volume as read-only (`:ro`) in consuming containers to prevent accidental modifications
 - All state files must persist for the container to maintain AD membership across recreations
 
 **Note**: The root crontab is stored in `/var/spool/cron/crontabs/root` and typically doesn't need explicit persistence as it's recreated during initialization.
