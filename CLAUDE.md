@@ -45,7 +45,7 @@ The container dynamically generates configuration files from environment variabl
 - Defaults to first component of realm using `${KERBEROS_REALM%%.*}`
 - Example: `EXAMPLE.COM` → `EXAMPLE` (auto-derived)
 - Must be set explicitly for multi-component realms (e.g., `WOODDALE.TEMPCO.COM` → `TEMPCO` not `WOODDALE`)
-- Used to generate `/etc/samba/smb.conf` immediately before domain join (lines 237-253 in kerberos-entrypoint.sh)
+- Used to generate `/etc/samba/smb.conf` immediately before domain join (lines 239-255 in kerberos-entrypoint.sh)
 
 **smb.conf Generation**: Created dynamically before `net ads join` command with:
 - `workgroup`: Derived from KERBEROS_WORKGROUP or realm

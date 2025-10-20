@@ -172,9 +172,10 @@ Your choice:
     - For directory tasks, append `/` to the filename
   - Skip if no relevant index exists and user declines to create one
 
-### 5: Commit the new task file
-- Stage the task file and any updated index files
-- Commit with descriptive message about the new task
+### 5: Inform user of task creation completion
+- DO NOT commit task files - task files are development artifacts, not repository content
+- Inform the user that the task file has been created at: `sessions/tasks/[priority]-[task-name].md`
+- If index files were updated, mention that as well
 
 
 ## Task Evolution
@@ -186,11 +187,11 @@ If a file task needs subtasks during work:
 4. Update active task reference if needed
   - ex:
   ```json
-  {{ "task": "some-task-dir/README.md" }}
+  { "task": "some-task-dir/README.md" }
   ```
   - ex:
   ```json
-  {{ "task": "some-task-dir/some-subtask.md" }}
+  { "task": "some-task-dir/some-subtask.md" }
   ```
 
 ## Important Note on Context

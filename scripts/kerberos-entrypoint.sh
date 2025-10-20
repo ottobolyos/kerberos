@@ -162,9 +162,11 @@ if [ ! -f "$INITIALIZED" ]; then
 	else
 		echo "ERROR: AD: Cannot resolve ${KERBEROS_REALM} via DNS" 1>&2
 		echo "       DNS lookup output:" 1>&2
-		echo "${dns_result}" | sed 's/^/       /' 1>&2
+		# shellcheck disable=SC2001  # Indenting each line of multi-line output - sed is cleaner than parameter expansion
+		sed 's/^/       /' <<< "${dns_result}" 1>&2
 		echo "" 1>&2
 		echo "       Configured DNS servers:" 1>&2
+		# shellcheck disable=SC2001  # Indenting each line of multi-line output - sed is cleaner than parameter expansion
 		grep -E '^nameserver' /etc/resolv.conf | sed 's/^/       /' 1>&2 || echo "       (none found)" 1>&2
 		exit 3
 	fi
@@ -236,8 +238,8 @@ if [ ! -f "$INITIALIZED" ]; then
 
 	# Derive workgroup from realm if not explicitly set
 	# Example: WOODDALE.TEMPCO.COM -> WOODDALE (but user can override with KERBEROS_WORKGROUP=TEMPCO)
-	local realm_first_component="${KERBEROS_REALM%%.*}"
-	local workgroup="${KERBEROS_WORKGROUP:-$realm_first_component}"
+	realm_first_component="${KERBEROS_REALM%%.*}"
+	workgroup="${KERBEROS_WORKGROUP:-$realm_first_component}"
 
 	echo ">> AD: Generating /etc/samba/smb.conf for domain join ..."
 	mkdir -p /etc/samba
