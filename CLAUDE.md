@@ -6,7 +6,7 @@ This repository contains a containerized Active Directory integration service th
 
 This is a minimal Ubuntu 24.04-based container that:
 - Joins an Active Directory domain
-- Dynamically generates Kerberos configuration from environment variables
+- Dynamically generates Kerberos configuration (krb5.conf) and Samba configuration (smb.conf) from environment variables
 - Creates and maintains Kerberos keytabs for shared authentication
 - Uses standard Kerberos environment variables (KRB5_CONFIG, KRB5_KTNAME) for configuration
 - Provides keytabs to other services via directory-based volume mounts
@@ -21,9 +21,11 @@ This is a minimal Ubuntu 24.04-based container that:
 
 ## Key Architectural Patterns
 
-### Standard Kerberos Environment Variables
+### Dynamic Configuration Generation
 
-The container uses standard MIT Kerberos environment variables for configuration:
+The container dynamically generates configuration files from environment variables during initialization:
+
+#### Standard Kerberos Environment Variables
 
 **KRB5_CONFIG**: Path to the krb5.conf file (default: `/etc/krb5.conf`)
 - Allows customizing where krb5.conf is located
@@ -35,6 +37,21 @@ The container uses standard MIT Kerberos environment variables for configuration
 - Stripped for `klist -k` commands using: `${KRB5_KTNAME#FILE:}`
 - Allows customizing where keytab is located for volume sharing
 - Referenced in scripts as: `KRB5_KEYTAB_FILE="${KRB5_KTNAME#FILE:}"`
+
+#### Samba Configuration (smb.conf)
+
+**KERBEROS_WORKGROUP**: NetBIOS workgroup/domain name (default: first component of KERBEROS_REALM)
+- Required by `net ads join` command for AD domain joining
+- Defaults to first component of realm using `${KERBEROS_REALM%%.*}`
+- Example: `EXAMPLE.COM` → `EXAMPLE` (auto-derived)
+- Must be set explicitly for multi-component realms (e.g., `WOODDALE.TEMPCO.COM` → `TEMPCO` not `WOODDALE`)
+- Used to generate `/etc/samba/smb.conf` immediately before domain join (lines 237-253 in kerberos-entrypoint.sh)
+
+**smb.conf Generation**: Created dynamically before `net ads join` command with:
+- `workgroup`: Derived from KERBEROS_WORKGROUP or realm
+- `realm`: Set to KERBEROS_REALM value
+- `security = ads`: Enables Active Directory security model
+- `kerberos method = system keytab`: Uses system-wide keytab for authentication
 
 ### Directory-Based Volume Sharing
 
@@ -70,11 +87,11 @@ See `/run/media/ts/root/home/ts/git/mriiot/otto/kerberos/readme.md` for complete
 **Primary Documentation:** See `/run/media/ts/root/home/ts/git/mriiot/otto/kerberos/readme.md` for:
 - Container architecture and lifecycle
 - AD initialization flow (8-step process)
-- Dynamic krb5.conf generation from KERBEROS_* environment variables
+- Dynamic krb5.conf and smb.conf generation from KERBEROS_* environment variables
 - Standard Kerberos environment variables (KRB5_CONFIG, KRB5_KTNAME)
 - Directory-based volume sharing pattern for multi-container deployments
 - Keytab refresh mechanism
-- Environment variables and configuration reference
+- Environment variables and configuration reference (including KERBEROS_WORKGROUP for AD workgroup configuration)
 - Exit codes and troubleshooting
 - Security best practices
 - Docker Compose deployment examples

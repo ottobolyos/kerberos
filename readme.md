@@ -22,7 +22,7 @@ The Kerberos container is a minimal Ubuntu 24.04-based system that:
 
 ### First Startup: Complete Initialization
 
-On first startup (when `/.initialized` marker file doesn't exist), the container executes a comprehensive 8-step AD integration sequence:
+On first startup (when `/var/lib/kerberos/initialized` marker file doesn't exist), the container executes a comprehensive 8-step AD integration sequence:
 
 #### 1. Environment Variable Validation
 Checks for three required environment variables:
@@ -30,7 +30,7 @@ Checks for three required environment variables:
 - `KERBEROS_ADMIN_PASSWORD`: Password for the AD admin user
 - `KERBEROS_REALM`: The AD realm to join (e.g., EXAMPLE.COM)
 
-Additionally, `KERBEROS_REALM` is used to dynamically generate `/etc/krb5.conf` before initialization begins.
+Additionally, `KERBEROS_REALM` (and optionally `KERBEROS_WORKGROUP`) are used to dynamically generate `/etc/krb5.conf` and `/etc/samba/smb.conf` during initialization.
 
 **Exit Code:** 2 if any required variables are missing
 
@@ -66,6 +66,15 @@ Performs Samba-specific AD joining via `net ads join`, which:
 - Establishes the machine's identity in the domain
 - Configures the ADS (Active Directory Services) client
 
+**Pre-requisite Configuration:**
+Before executing the domain join, the container dynamically generates `/etc/samba/smb.conf` with:
+- `workgroup`: Derived from `KERBEROS_WORKGROUP` (or first component of `KERBEROS_REALM` if not set)
+- `realm`: Set to `KERBEROS_REALM` value
+- `security = ads`: Active Directory security mode
+- `kerberos method = system keytab`: Use system-wide keytab for authentication
+
+This configuration is required for `net ads join` to properly identify the AD domain and security settings.
+
 **Exit Code:** 5 if domain join fails
 
 #### 5. DNS Registration
@@ -100,11 +109,11 @@ Configures automated keytab maintenance:
 - **Rationale**: 7-day cycle stays well ahead of AD's default 30-day password rotation
 
 #### 8. Initialization Marker
-Creates the `/.initialized` marker file to prevent re-initialization on subsequent container restarts, preserving existing AD membership.
+Creates the `/var/lib/kerberos/initialized` marker file to prevent re-initialization on subsequent container restarts, preserving existing AD membership.
 
 ### Subsequent Startups: Verification Mode
 
-When the container starts and `/.initialized` exists:
+When the container starts and `/var/lib/kerberos/initialized` exists:
 
 1. Skips all initialization steps
 2. Runs a non-blocking membership verification check (`net ads testjoin`)
@@ -161,6 +170,7 @@ The container dynamically generates `/etc/krb5.conf` from environment variables 
 | `KERBEROS_DNS_LOOKUP_REALM` | Use DNS to locate realm | `false` | `true` |
 | `KERBEROS_FORWARDABLE` | Allow ticket forwarding | `true` | `false` |
 | `KERBEROS_RDNS` | Enable reverse DNS lookups | `false` | `true` |
+| `KERBEROS_WORKGROUP` | NetBIOS workgroup/domain name for AD | First component of KERBEROS_REALM | `TEMPCO` |
 | `KRB5_CONFIG` | Custom path for krb5.conf file | `/etc/krb5.conf` | `/etc/krb5/krb5.conf` |
 
 **Important Notes:**
@@ -169,6 +179,7 @@ The container dynamically generates `/etc/krb5.conf` from environment variables 
 - Manual modifications to the krb5.conf file will be lost on restart - use environment variables instead
 - To share krb5.conf between containers (e.g., with Samba containers), set `KRB5_CONFIG=/etc/krb5/krb5.conf` and mount `/etc/krb5/` as a named volume
 - Docker named volumes can only mount to directories, not individual files - use `KRB5_CONFIG` to move krb5.conf into a directory for sharing
+- `KERBEROS_WORKGROUP`: The default (first component of realm) may not match your actual AD workgroup for multi-component realms (e.g., `WOODDALE.TEMPCO.COM` → defaults to `WOODDALE` but actual workgroup might be `TEMPCO`). Set explicitly if the derived value is incorrect.
 
 #### Optional (for keytab configuration)
 | Variable | Description | Default | Example |

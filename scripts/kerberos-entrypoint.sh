@@ -234,6 +234,24 @@ if [ ! -f "$INITIALIZED" ]; then
 
 	echo ">> AD: Realm configuration verified (configured: ${is_realm_configured})"
 
+	# Derive workgroup from realm if not explicitly set
+	# Example: WOODDALE.TEMPCO.COM -> WOODDALE (but user can override with KERBEROS_WORKGROUP=TEMPCO)
+	local realm_first_component="${KERBEROS_REALM%%.*}"
+	local workgroup="${KERBEROS_WORKGROUP:-$realm_first_component}"
+
+	echo ">> AD: Generating /etc/samba/smb.conf for domain join ..."
+	mkdir -p /etc/samba
+	cat > /etc/samba/smb.conf <<-EOF
+	[global]
+	   workgroup = $workgroup
+	   realm = ${KERBEROS_REALM}
+	   security = ads
+	   kerberos method = system keytab
+	EOF
+	chmod 644 /etc/samba/smb.conf
+	echo "   Workgroup: $workgroup"
+	echo "   Realm: ${KERBEROS_REALM}"
+
 	echo ">> AD: Joining the ${KERBEROS_REALM,,} domain ..."
 	net ads join -U"${KERBEROS_ADMIN_USER}%${KERBEROS_ADMIN_PASSWORD}"
 
