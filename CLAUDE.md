@@ -11,6 +11,7 @@ This is a minimal Ubuntu 24.04-based container that:
 - Uses standard Kerberos environment variables (KRB5_CONFIG, KRB5_KTNAME) for configuration
 - Provides keytabs to other services via directory-based volume mounts
 - Automatically refreshes keytabs to stay ahead of AD password rotation
+- Monitors container health via Docker HEALTHCHECK (keytab validity and AD connectivity)
 
 **Key Files:**
 - `/run/media/ts/root/home/ts/git/mriiot/otto/kerberos/readme.md` - Complete container documentation including architecture, configuration, and troubleshooting
@@ -91,6 +92,7 @@ See `/run/media/ts/root/home/ts/git/mriiot/otto/kerberos/readme.md` for complete
 - Standard Kerberos environment variables (KRB5_CONFIG, KRB5_KTNAME)
 - Directory-based volume sharing pattern for multi-container deployments
 - Keytab refresh mechanism
+- Health monitoring via Docker HEALTHCHECK (keytab validity and AD connectivity verification)
 - Environment variables and configuration reference (including KERBEROS_WORKGROUP for AD workgroup configuration)
 - Exit codes and troubleshooting
 - Security best practices

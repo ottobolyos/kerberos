@@ -315,6 +315,124 @@ The Dockerfile defines the following startup process:
    - `cron`: Starts cron daemon for scheduled keytab refresh
    - `tail -f /dev/null`: Keeps container running indefinitely
 
+## Health Monitoring
+
+The container includes a Docker HEALTHCHECK that periodically verifies the container is functioning correctly. A "healthy" container has both a valid keytab and working Active Directory connectivity.
+
+### Docker HEALTHCHECK
+
+**What the health check verifies:**
+
+1. **Keytab file exists and is readable** - Uses `klist -k` to verify the keytab at the configured location (default `/etc/krb5.keytab`) contains valid Kerberos credentials. Without this file, no service can authenticate to Active Directory.
+
+2. **Active Directory connectivity is working** - Uses `net ads testjoin` to test communication with AD domain controllers, verify the machine account is still valid in Active Directory, and ensure DNS resolution is working.
+
+**Health check command:**
+```bash
+keytab="${KRB5_KTNAME:-FILE:/etc/krb5.keytab}" && \
+klist -k "${keytab#FILE:}" && \
+net ads testjoin || exit 1
+```
+
+**Container health states:**
+- **starting** - During the start period (first 120 seconds), health check failures are ignored to allow initialization to complete
+- **healthy** - Both keytab verification and AD connectivity tests pass
+- **unhealthy** - Health check has failed 3 consecutive times (indicating 15 minutes of sustained issues)
+
+### Health Check Configuration
+
+The HEALTHCHECK is configured with timing parameters that balance timely issue detection with operational overhead:
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| **interval** | 5m | Health checks run every 5 minutes after startup completes. This balances timely detection of AD connectivity issues with minimal overhead on the container and AD infrastructure. |
+| **timeout** | 10s | Maximum time allowed for the health check to complete. Generous enough for `klist -k` (local file read, milliseconds) and `net ads testjoin` (network operation, typically 1-3 seconds) while allowing for temporary network latency. |
+| **start-period** | 120s | Grace period during which health check failures are ignored. Accommodates the 8-step initialization sequence on first startup (realm discovery, DNS verification, credential validation, realm join, domain join, DNS registration, keytab creation). |
+| **retries** | 3 | Number of consecutive failures before marking container as unhealthy. Handles transient network glitches, temporary AD service issues, and brief DNS resolution delays. Container only marked unhealthy after sustained failures (3 × 5 minute intervals = 15 minutes). |
+
+### Viewing Health Status
+
+**Check container health status:**
+```bash
+docker ps
+```
+
+The `STATUS` column shows health state:
+```
+CONTAINER ID   IMAGE              STATUS
+abc123def456   kerberos:latest    Up 10 minutes (healthy)
+```
+
+**View detailed health check history:**
+```bash
+docker inspect <container-name-or-id> | jq '.[0].State.Health'
+```
+
+Example output:
+```json
+{
+  "Status": "healthy",
+  "FailingStreak": 0,
+  "Log": [
+    {
+      "Start": "2025-10-20T10:15:00.000000000Z",
+      "End": "2025-10-20T10:15:01.234567890Z",
+      "ExitCode": 0,
+      "Output": "Keytab contains 2 principals\nJoin to domain is OK\n"
+    }
+  ]
+}
+```
+
+### Troubleshooting Unhealthy Containers
+
+If a container shows `unhealthy` status, follow these diagnostic steps:
+
+**1. Check container logs:**
+```bash
+docker logs <container-name>
+```
+Look for errors in the initialization sequence or service startup.
+
+**2. Manually verify keytab:**
+```bash
+docker exec <container-name> klist -k /etc/krb5.keytab
+```
+Should list principals like `host/hostname@REALM.COM`. If the file doesn't exist or is empty, the container needs re-initialization.
+
+**3. Manually test domain connectivity:**
+```bash
+docker exec <container-name> net ads testjoin
+```
+Should output "Join to domain is OK". Failures indicate:
+- **Network connectivity issues** - Cannot reach domain controllers
+- **DNS resolution problems** - Cannot resolve domain controller hostnames
+- **Expired machine account** - Computer account removed from AD or password expired
+- **AD service outage** - Domain controllers unavailable
+
+**4. Verify AD connectivity from the host:**
+```bash
+nslookup <domain-controller-hostname>
+ping <domain-controller-hostname>
+```
+Ensures the network path to AD is available.
+
+**5. Check firewall rules:**
+Ensure the container can reach domain controllers on required ports:
+- TCP/UDP 88 (Kerberos)
+- TCP/UDP 389 (LDAP)
+- TCP 445 (SMB)
+- TCP/UDP 53 (DNS)
+
+**6. Re-initialize if needed:**
+If the keytab is missing or the machine account is invalid, remove the initialization marker to force a fresh domain join:
+```bash
+docker exec <container-name> rm /var/lib/kerberos/initialized
+docker restart <container-name>
+```
+
+**Warning:** Re-initialization will leave a stale computer account in AD if the original account wasn't properly removed. Clean up stale accounts manually in Active Directory Users and Computers.
+
 ## Persistence Considerations
 
 For the container to persist AD membership across restarts, the following should be preserved via named volumes:

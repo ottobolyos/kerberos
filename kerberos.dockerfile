@@ -17,6 +17,7 @@
 # - Directory-based volume sharing pattern for multi-container deployments
 # - "Join once, maintain forever" pattern with initialization marker
 # - Automated keytab refresh every 7 days via cron
+# - Health monitoring via Docker HEALTHCHECK (keytab validity and AD connectivity)
 # - Supports both host and container DNS registration modes
 #
 # Required Environment Variables:
@@ -69,6 +70,10 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 # Copy keytab refresh cron script
 COPY scripts/kerberos-refresh.sh /usr/local/bin/kerberos-refresh.sh
 RUN chmod +x /usr/local/bin/kerberos-refresh.sh
+
+# Health check: Verify keytab exists and AD connectivity works
+HEALTHCHECK --interval=5m --timeout=10s --start-period=120s --retries=3 \
+  CMD /bin/bash -c 'keytab="${KRB5_KTNAME:-FILE:/etc/krb5.keytab}" && klist -k "${keytab#FILE:}" && net ads testjoin || exit 1'
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["/bin/bash", "-c", "service winbind start && cron && tail -f /dev/null"]
