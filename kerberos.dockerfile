@@ -59,6 +59,7 @@ RUN apt-get update && apt-get install -y \
     krb5-user \
     winbind \
     samba-common-bin \
+    socat \
     cron \
     dnsutils \
     iputils-ping \
@@ -75,9 +76,16 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 COPY scripts/kerberos-refresh.sh /usr/local/bin/kerberos-refresh.sh
 RUN chmod +x /usr/local/bin/kerberos-refresh.sh
 
+# Copy winbind TCP proxy startup script
+COPY scripts/winbind-proxy-start.sh /usr/local/bin/winbind-proxy-start.sh
+RUN chmod +x /usr/local/bin/winbind-proxy-start.sh
+
+# Expose winbind TCP proxy port for remote container access
+EXPOSE 9999
+
 # Health check: Verify keytab exists and AD connectivity works
 HEALTHCHECK --interval=5m --timeout=10s --start-period=120s --retries=3 \
   CMD /bin/bash -c 'keytab="${KRB5_KTNAME:-FILE:/etc/krb5.keytab}" && klist -k "${keytab#FILE:}" && net ads testjoin || exit 1'
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["/bin/bash", "-c", "service winbind start && cron && tail -f /dev/null"]
+CMD ["/bin/bash", "-c", "service winbind start && /usr/local/bin/winbind-proxy-start.sh & cron && tail -f /dev/null"]
