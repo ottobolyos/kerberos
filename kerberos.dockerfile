@@ -58,6 +58,7 @@ RUN apt-get update && apt-get install -y \
     samba-common-bin \
     cron \
     dnsutils \
+    iputils-ping \
     && rm -rf /var/lib/apt/lists/*
 
 # Create directory for Samba private data
