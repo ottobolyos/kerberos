@@ -313,26 +313,6 @@ if [ ! -f "$INITIALIZED" ]; then
 		exit 5
 	fi
 
-	# Register CIFS service principal names for SMB/CIFS authentication
-	echo '>> AD: Registering CIFS service principals ...'
-	fqdn=$(hostname -f)
-	short_hostname=$(hostname -s)
-
-	if ! net ads setspn add "cifs/${fqdn}" -U"${KERBEROS_ADMIN_USER}%${KERBEROS_ADMIN_PASSWORD}"; then
-		echo "ERROR: AD: Failed to register CIFS SPN for FQDN (cifs/${fqdn})." 1>&2
-		exit 8
-	fi
-	echo "   Registered: cifs/${fqdn}"
-
-	if ! net ads setspn add "cifs/${short_hostname}" -U"${KERBEROS_ADMIN_USER}%${KERBEROS_ADMIN_PASSWORD}"; then
-		echo "ERROR: AD: Failed to register CIFS SPN for short hostname (cifs/${short_hostname})." 1>&2
-		exit 8
-	fi
-	echo "   Registered: cifs/${short_hostname}"
-
-	echo '>> AD: Verifying registered SPNs ...'
-	net ads setspn list "${short_hostname}" -U"${KERBEROS_ADMIN_USER}%${KERBEROS_ADMIN_PASSWORD}"
-
 	# Register DNS entry
 	if [ -n "${HOST_IP-}" ] && [ -n "${HOST_HOSTNAME-}" ]; then
 		echo ">> AD: Registering host DNS entry: ${HOST_HOSTNAME} -> ${HOST_IP}"

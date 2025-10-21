@@ -22,7 +22,7 @@ The Kerberos container is a minimal Ubuntu 24.04-based system that:
 
 ### First Startup: Complete Initialization
 
-On first startup (when `/var/lib/kerberos/initialized` marker file doesn't exist), the container executes a comprehensive 9-step AD integration sequence:
+On first startup (when `/var/lib/kerberos/initialized` marker file doesn't exist), the container executes a comprehensive 8-step AD integration sequence:
 
 #### 1. Environment Variable Validation
 Checks for three required environment variables:
@@ -78,16 +78,17 @@ This configuration is required for `net ads join` to properly identify the AD do
 **Exit Code:** 5 if domain join fails
 
 #### 5. CIFS Service Principal Registration
-Registers CIFS service principal names (SPNs) in Active Directory for SMB/CIFS authentication:
-- Registers `cifs/hostname.domain.com` and `cifs/HOSTNAME` SPNs using `net ads setspn add`
+CIFS service principal names (SPNs) are automatically registered in Active Directory during the `realm join` operation:
+- Modern versions of `adcli` (0.9.2+ in Ubuntu 24.04) automatically register both `host/` and `cifs/` SPNs
+- Includes `cifs/hostname.domain.com` and `cifs/HOSTNAME` for SMB/CIFS authentication
 - Required for Windows SMB clients to authenticate (they request `cifs/` tickets, not `host/` tickets)
-- SPNs are verified with `net ads setspn list` after registration
 - The keytab will include both `host/` and `cifs/` principals after creation
+- The entrypoint script verifies CIFS principals exist in the final keytab
 
 **Why CIFS SPNs Are Needed:**
 Windows SMB clients always request Kerberos tickets for the `cifs/hostname` service when connecting to SMB shares. Without CIFS SPNs registered in AD and present in the keytab, SMB servers cannot decrypt these tickets, causing authentication failures even though the container is properly domain-joined.
 
-**Exit Code:** 8 if CIFS SPN registration fails
+**Exit Code:** 8 if CIFS principals are missing from keytab
 
 #### 6. DNS Registration
 Registers the container's presence in Active Directory DNS. Two modes are supported:
@@ -103,9 +104,10 @@ Registers the container's presence in Active Directory DNS. Two modes are suppor
 
 **Exit Code:** 6 if DNS registration fails
 
-#### 7. Keytab Creation
+#### 6. Keytab Creation
 Creates the critical authentication artifact using `net ads keytab create`:
 - Generates `/etc/krb5.keytab` containing encrypted keys for the machine account
+- Reads service principals from AD (registered by `adcli` during realm join) and creates keytab entries
 - Enables services to authenticate to Kerberos without interactive login
 - Keytab is machine-specific and tied to the AD computer account
 - **Contains both `host/` and `cifs/` principals** for comprehensive service authentication
@@ -114,14 +116,14 @@ The keytab contents are verified using `klist -k /etc/krb5.keytab`, and the pres
 
 **Exit Code:** 7 if keytab creation fails, 8 if CIFS principals are missing from keytab
 
-#### 8. Cron Job Setup
+#### 7. Cron Job Setup
 Configures automated keytab maintenance:
 - **Schedule**: `0 0 */7 * *` (midnight every 7 days)
 - **Command**: `/usr/local/bin/kerberos-refresh.sh`
 - **Logging**: Output redirected to `/var/log/keytab-refresh.log`
 - **Rationale**: 7-day cycle stays well ahead of AD's default 30-day password rotation
 
-#### 9. Initialization Marker
+#### 8. Initialization Marker
 Creates the `/var/lib/kerberos/initialized` marker file to prevent re-initialization on subsequent container restarts, preserving existing AD membership.
 
 ### Subsequent Startups: Verification Mode
@@ -561,7 +563,7 @@ The container dynamically generates `/etc/krb5.conf` from environment variables 
 | 5 | Failed to join domain (ADS protocol issues) |
 | 6 | Failed to register DNS entry (AD DNS service issues) |
 | 7 | Failed to create keytab (permission issues, AD configuration) |
-| 8 | Failed to register CIFS service principal names or CIFS principals missing from keytab |
+| 8 | CIFS principals missing from keytab (indicates adcli failed to register SPNs or keytab creation didn't include them) |
 
 #### kerberos-refresh.sh
 | Code | Meaning |

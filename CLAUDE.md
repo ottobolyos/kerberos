@@ -63,15 +63,14 @@ The container dynamically generates configuration files from environment variabl
 
 **Problem**: Windows SMB clients request `cifs/hostname` tickets from AD, not `host/hostname` tickets. Without CIFS SPNs, SMB authentication fails even when the container is domain-joined.
 
-**Solution**: Automatically register CIFS service principals immediately after successful domain join:
+**Solution**: CIFS service principals are automatically registered by `adcli` during the `realm join` operation (Ubuntu 24.04 uses adcli 0.9.2+ which includes automatic CIFS SPN registration).
 
-**Registration Process** (lines 316-333 in kerberos-entrypoint.sh):
-1. Execute `net ads setspn add cifs/hostname.domain.com` for FQDN form
-2. Execute `net ads setspn add cifs/HOSTNAME` for short hostname form
-3. Verify SPNs registered in AD using `net ads setspn list`
-4. Verify CIFS principals appear in final keytab after creation
+**Registration Process**:
+1. During `realm join`, `adcli` automatically registers both `host/` and `cifs/` service principals in AD
+2. The `net ads keytab create` command reads these SPNs from AD and adds corresponding principals to the keytab
+3. The entrypoint script verifies CIFS principals exist in the final keytab after creation
 
-**Exit Code**: 8 if CIFS SPN registration fails or CIFS principals missing from keytab
+**Exit Code**: 8 if CIFS principals are missing from keytab (indicates adcli failed to register SPNs or keytab creation didn't include them)
 
 **Persistence**: CIFS SPNs remain registered in AD across keytab refreshes. The refresh script (lines 35-57 in kerberos-refresh.sh) includes defensive verification:
 - Checks if CIFS SPNs still exist in AD before each refresh
