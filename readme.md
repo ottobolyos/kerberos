@@ -22,7 +22,7 @@ The Kerberos container is a minimal Ubuntu 24.04-based system that:
 
 ### First Startup: Complete Initialization
 
-On first startup (when `/var/lib/kerberos/initialized` marker file doesn't exist), the container executes a comprehensive 8-step AD integration sequence:
+On first startup (when `/var/lib/kerberos/initialized` marker file doesn't exist), the container executes a comprehensive 9-step AD integration sequence:
 
 #### 1. Environment Variable Validation
 Checks for three required environment variables:
@@ -77,7 +77,19 @@ This configuration is required for `net ads join` to properly identify the AD do
 
 **Exit Code:** 5 if domain join fails
 
-#### 5. DNS Registration
+#### 5. CIFS Service Principal Registration
+Registers CIFS service principal names (SPNs) in Active Directory for SMB/CIFS authentication:
+- Registers `cifs/hostname.domain.com` and `cifs/HOSTNAME` SPNs using `net ads setspn add`
+- Required for Windows SMB clients to authenticate (they request `cifs/` tickets, not `host/` tickets)
+- SPNs are verified with `net ads setspn list` after registration
+- The keytab will include both `host/` and `cifs/` principals after creation
+
+**Why CIFS SPNs Are Needed:**
+Windows SMB clients always request Kerberos tickets for the `cifs/hostname` service when connecting to SMB shares. Without CIFS SPNs registered in AD and present in the keytab, SMB servers cannot decrypt these tickets, causing authentication failures even though the container is properly domain-joined.
+
+**Exit Code:** 8 if CIFS SPN registration fails
+
+#### 6. DNS Registration
 Registers the container's presence in Active Directory DNS. Two modes are supported:
 
 **Host DNS Registration Mode** (when both `HOST_IP` and `HOST_HOSTNAME` are set):
@@ -91,24 +103,25 @@ Registers the container's presence in Active Directory DNS. Two modes are suppor
 
 **Exit Code:** 6 if DNS registration fails
 
-#### 6. Keytab Creation
+#### 7. Keytab Creation
 Creates the critical authentication artifact using `net ads keytab create`:
 - Generates `/etc/krb5.keytab` containing encrypted keys for the machine account
 - Enables services to authenticate to Kerberos without interactive login
 - Keytab is machine-specific and tied to the AD computer account
+- **Contains both `host/` and `cifs/` principals** for comprehensive service authentication
 
-The keytab contents are verified using `klist -k /etc/krb5.keytab`.
+The keytab contents are verified using `klist -k /etc/krb5.keytab`, and the presence of CIFS principals is specifically validated.
 
-**Exit Code:** 7 if keytab creation fails
+**Exit Code:** 7 if keytab creation fails, 8 if CIFS principals are missing from keytab
 
-#### 7. Cron Job Setup
+#### 8. Cron Job Setup
 Configures automated keytab maintenance:
 - **Schedule**: `0 0 */7 * *` (midnight every 7 days)
 - **Command**: `/usr/local/bin/kerberos-refresh.sh`
 - **Logging**: Output redirected to `/var/log/keytab-refresh.log`
 - **Rationale**: 7-day cycle stays well ahead of AD's default 30-day password rotation
 
-#### 8. Initialization Marker
+#### 9. Initialization Marker
 Creates the `/var/lib/kerberos/initialized` marker file to prevent re-initialization on subsequent container restarts, preserving existing AD membership.
 
 ### Subsequent Startups: Verification Mode
@@ -132,10 +145,13 @@ Active Directory rotates machine account passwords every 30 days by default. The
 
 **Steps:**
 1. **Environment Validation**: Verifies `KERBEROS_ADMIN_USER` and `KERBEROS_ADMIN_PASSWORD` are defined
-2. **Keytab Recreation**: Executes `net ads keytab create` to regenerate the keytab with current machine account keys
-3. **Verification**: Lists keytab contents and logs success
+2. **CIFS SPN Verification**: Checks if CIFS SPNs are still registered in AD, re-registers if missing
+3. **Keytab Recreation**: Executes `net ads keytab create` to regenerate the keytab with current machine account keys (including any re-registered CIFS SPNs)
+4. **Verification**: Lists keytab contents, verifies CIFS principals are present, and logs success
 
 **Exit Code:** 1 if refresh fails (credentials missing, network issues, or AD connectivity problems)
+
+**Note**: CIFS SPNs should remain registered in AD between refreshes. The verification step ensures they persist and automatically re-registers them if they were removed (e.g., manual AD changes or account recreation).
 
 All output is logged to `/var/log/keytab-refresh.log` via cron redirection.
 
@@ -212,6 +228,7 @@ The container dynamically generates `/etc/krb5.conf` from environment variables 
 | 5 | Failed to join domain (ADS protocol issues) |
 | 6 | Failed to register DNS entry (AD DNS service issues) |
 | 7 | Failed to create keytab (permission issues, AD configuration) |
+| 8 | Failed to register CIFS service principal names or CIFS principals missing from keytab |
 
 #### kerberos-refresh.sh
 | Code | Meaning |
@@ -284,6 +301,22 @@ net ads dns register hostname.example.com 192.168.1.100 -U"admin_user%password"
 net ads dns register -U"admin_user%password"
 ```
 
+### Service Principal Name (SPN) Operations
+```bash
+# Register CIFS SPNs for SMB/CIFS authentication
+net ads setspn add "cifs/$(hostname -f)" -U"admin_user%password"
+net ads setspn add "cifs/$(hostname -s)" -U"admin_user%password"
+
+# List all SPNs registered for this computer
+net ads setspn list "$(hostname -s)" -U"admin_user%password"
+
+# Expected output includes:
+#   host/hostname.domain.com
+#   host/HOSTNAME
+#   cifs/hostname.domain.com
+#   cifs/HOSTNAME
+```
+
 ### Keytab Operations
 ```bash
 # Create/refresh keytab
@@ -291,6 +324,13 @@ net ads keytab create -U"admin_user%password"
 
 # List keytab contents
 klist -k /etc/krb5.keytab
+
+# Verify CIFS principals are present
+klist -k /etc/krb5.keytab | grep cifs
+
+# Expected output:
+#   2 cifs/hostname.domain.com@REALM.COM
+#   2 cifs/HOSTNAME@REALM.COM
 ```
 
 ### Cron Management
@@ -732,6 +772,38 @@ nc -zv dc.example.com 53
 2. Check keytab contents: `klist -k /etc/krb5.keytab`
 3. Test AD membership: `net ads testjoin`
 4. Check service configuration for correct principal names
+
+### SMB/CIFS authentication failures from Windows clients
+
+**Symptom**: Windows clients cannot connect to SMB shares even though the container is domain-joined
+
+**Cause**: Missing CIFS service principals in the keytab
+
+**Diagnosis**:
+```bash
+# Check if CIFS principals exist in keytab
+docker exec <container-name> klist -k /etc/krb5.keytab | grep cifs
+
+# Check if CIFS SPNs are registered in AD
+docker exec <container-name> net ads setspn list "$(hostname -s)"
+```
+
+**Expected output**:
+- Keytab should contain: `cifs/hostname.domain.com@REALM` and `cifs/HOSTNAME@REALM`
+- SPN list should include both `cifs/` entries
+
+**Solution**:
+If CIFS principals are missing, the container may have been initialized before CIFS SPN support was added. Reinitialize the container:
+```bash
+# Remove initialization marker to force re-initialization
+docker exec <container-name> rm /var/lib/kerberos/initialized
+
+# Restart container to trigger full initialization with CIFS SPN registration
+docker restart <container-name>
+```
+
+**Why this happens**:
+Windows SMB clients always request Kerberos tickets for the `cifs/hostname` service (not `host/hostname`). Without CIFS principals in the keytab, the SMB server cannot decrypt these tickets, causing authentication failures.
 
 ### krb5.conf keeps regenerating and losing custom changes
 

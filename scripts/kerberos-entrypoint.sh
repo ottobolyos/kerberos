@@ -4,7 +4,7 @@
 # Joins Active Directory and exports keytab for shared authentication
 #
 # Documentation: See /run/media/ts/root/home/ts/git/mriiot/otto/kerberos/readme.md for:
-# - Complete AD initialization flow (8 steps)
+# - Complete AD initialization flow (9 steps)
 # - Environment variables reference
 # - Troubleshooting guides
 # - Container lifecycle and architecture
@@ -26,6 +26,7 @@
 # 5 - Failed to join domain
 # 6 - Failed to register DNS entry
 # 7 - Failed to create keytab
+# 8 - Failed to register CIFS service principal names
 
 set -euo pipefail
 
@@ -263,6 +264,26 @@ if [ ! -f "$INITIALIZED" ]; then
 		exit 5
 	fi
 
+	# Register CIFS service principal names for SMB/CIFS authentication
+	echo '>> AD: Registering CIFS service principals ...'
+	fqdn=$(hostname -f)
+	short_hostname=$(hostname -s)
+
+	if ! net ads setspn add "cifs/${fqdn}" -U"${KERBEROS_ADMIN_USER}%${KERBEROS_ADMIN_PASSWORD}"; then
+		echo "ERROR: AD: Failed to register CIFS SPN for FQDN (cifs/${fqdn})." 1>&2
+		exit 8
+	fi
+	echo "   Registered: cifs/${fqdn}"
+
+	if ! net ads setspn add "cifs/${short_hostname}" -U"${KERBEROS_ADMIN_USER}%${KERBEROS_ADMIN_PASSWORD}"; then
+		echo "ERROR: AD: Failed to register CIFS SPN for short hostname (cifs/${short_hostname})." 1>&2
+		exit 8
+	fi
+	echo "   Registered: cifs/${short_hostname}"
+
+	echo '>> AD: Verifying registered SPNs ...'
+	net ads setspn list "${short_hostname}" -U"${KERBEROS_ADMIN_USER}%${KERBEROS_ADMIN_PASSWORD}"
+
 	# Register DNS entry
 	if [ -n "${HOST_IP-}" ] && [ -n "${HOST_HOSTNAME-}" ]; then
 		echo ">> AD: Registering host DNS entry: ${HOST_HOSTNAME} -> ${HOST_IP}"
@@ -289,6 +310,14 @@ if [ ! -f "$INITIALIZED" ]; then
 
 	echo '>> AD: Verifying keytab contents ...'
 	klist -k "$KRB5_KEYTAB_FILE"
+
+	echo '>> AD: Verifying CIFS principals in keytab ...'
+	if klist -k "$KRB5_KEYTAB_FILE" | grep -q "cifs/"; then
+		echo '   ✓ CIFS principals found in keytab'
+	else
+		echo 'ERROR: AD: CIFS principals missing from keytab after registration.' 1>&2
+		exit 8
+	fi
 
 	echo '>> AD: Setting up keytab refresh cron job (every 7 days) ...'
 	echo "0 0 */7 * * /usr/local/bin/kerberos-refresh.sh >> /var/log/keytab-refresh.log 2>&1" | crontab -
