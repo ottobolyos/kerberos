@@ -12,11 +12,14 @@
 #
 # Key Features:
 # - Minimal Ubuntu 24.04 base (only AD client packages, not full Samba server)
-# - Dynamic krb5.conf generation from KERBEROS_* environment variables
+# - Dynamic krb5.conf and smb.conf generation from KERBEROS_* environment variables
 # - Standard Kerberos environment variables (KRB5_CONFIG, KRB5_KTNAME) for file locations
+# - Automatic CIFS service principal registration for SMB/CIFS authentication
+# - Winbind RPC proxy for multi-container SMB deployments with network isolation
+# - Automatic network detection and security configuration (hosts allow)
 # - Directory-based volume sharing pattern for multi-container deployments
 # - "Join once, maintain forever" pattern with initialization marker
-# - Automated keytab refresh every 7 days via cron
+# - Automated keytab refresh every 7 days via cron (includes CIFS SPN verification)
 # - Health monitoring via Docker HEALTHCHECK (keytab validity and AD connectivity)
 # - Supports both host and container DNS registration modes
 #

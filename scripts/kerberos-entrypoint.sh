@@ -16,6 +16,7 @@
 # - samba-common-bin (net)
 # - krb5-user (klist, kinit, kdestroy)
 # - dnsutils (nslookup)
+# - iputils-ping (ping - for network isolation detection)
 #
 # Exit codes:
 # 0 - Success

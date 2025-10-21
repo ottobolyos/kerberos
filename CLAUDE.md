@@ -7,11 +7,12 @@ This repository contains a containerized Active Directory integration service th
 This is a minimal Ubuntu 24.04-based container that:
 - Joins an Active Directory domain
 - Dynamically generates Kerberos configuration (krb5.conf) and Samba configuration (smb.conf) from environment variables
-- Creates and maintains Kerberos keytabs for shared authentication
+- Creates and maintains Kerberos keytabs for shared authentication (including CIFS service principals)
 - Uses standard Kerberos environment variables (KRB5_CONFIG, KRB5_KTNAME) for configuration
 - Provides keytabs to other services via directory-based volume mounts
 - Automatically refreshes keytabs to stay ahead of AD password rotation
 - Monitors container health via Docker HEALTHCHECK (keytab validity and AD connectivity)
+- Exposes winbind proxy for multi-container SMB deployments with network isolation
 
 **Key Files:**
 - `/run/media/ts/root/home/ts/git/mriiot/otto/kerberos/readme.md` - Complete container documentation including architecture, configuration, and troubleshooting
@@ -46,13 +47,84 @@ The container dynamically generates configuration files from environment variabl
 - Defaults to first component of realm using `${KERBEROS_REALM%%.*}`
 - Example: `EXAMPLE.COM` → `EXAMPLE` (auto-derived)
 - Must be set explicitly for multi-component realms (e.g., `WOODDALE.TEMPCO.COM` → `TEMPCO` not `WOODDALE`)
-- Used to generate `/etc/samba/smb.conf` immediately before domain join (lines 239-255 in kerberos-entrypoint.sh)
+- Used to generate `/etc/samba/smb.conf` immediately before domain join (lines 288-304 in kerberos-entrypoint.sh)
 
 **smb.conf Generation**: Created dynamically before `net ads join` command with:
 - `workgroup`: Derived from KERBEROS_WORKGROUP or realm
 - `realm`: Set to KERBEROS_REALM value
 - `security = ads`: Enables Active Directory security model
 - `kerberos method = system keytab`: Uses system-wide keytab for authentication
+- `rpc_server:winbind = embedded`: Enables embedded RPC server within winbind process
+- `rpc_daemon:winbindd = fork`: Uses forking model for concurrent RPC requests
+- `hosts allow`: Dynamically generated list of internal networks plus localhost
+
+### CIFS Service Principal Registration
+
+**Problem**: Windows SMB clients request `cifs/hostname` tickets from AD, not `host/hostname` tickets. Without CIFS SPNs, SMB authentication fails even when the container is domain-joined.
+
+**Solution**: Automatically register CIFS service principals immediately after successful domain join:
+
+**Registration Process** (lines 316-333 in kerberos-entrypoint.sh):
+1. Execute `net ads setspn add cifs/hostname.domain.com` for FQDN form
+2. Execute `net ads setspn add cifs/HOSTNAME` for short hostname form
+3. Verify SPNs registered in AD using `net ads setspn list`
+4. Verify CIFS principals appear in final keytab after creation
+
+**Exit Code**: 8 if CIFS SPN registration fails or CIFS principals missing from keytab
+
+**Persistence**: CIFS SPNs remain registered in AD across keytab refreshes. The refresh script (lines 35-57 in kerberos-refresh.sh) includes defensive verification:
+- Checks if CIFS SPNs still exist in AD before each refresh
+- Re-registers them if missing (handles manual AD changes or account recreation)
+- Verifies CIFS principals in refreshed keytab
+
+This ensures SMB/CIFS authentication never silently breaks due to missing service principals.
+
+### Winbind Proxy for Multi-Container SMB Deployments
+
+**Problem**: In Docker deployments with isolated internal networks (`internal: true`), SMB containers cannot reach AD domain controllers to query user/group information for authorization decisions.
+
+**Solution**: The kerberos container exposes its winbind daemon as an RPC proxy, allowing isolated SMB containers to query AD indirectly through the kerberos container.
+
+**Architecture**:
+```
+External Network (AD Domain Controllers)
+           ↑
+           │ (AD queries)
+    [Kerberos Container]
+      - winbind RPC server
+      - Has AD credentials
+           │
+           ↓ (RPC protocol)
+   Internal Network (isolated)
+           ↓
+    [SMB Containers]
+      - Query winbind proxy
+      - No direct AD access
+      - No AD credentials needed
+```
+
+**Automatic Network Detection** (lines 245-286 in kerberos-entrypoint.sh):
+
+The container automatically identifies internal (isolated) networks using connectivity-based detection:
+
+1. **Enumerate interfaces**: Lists all non-loopback network interfaces via `ip -o -4 addr show`
+2. **Calculate network addresses**: Uses bitwise operations to compute network CIDR from IP/netmask (supports any subnet size: /8, /16, /24, /32, etc.)
+3. **Test external connectivity**: Pings 8.8.8.8 (Google DNS) from each interface
+4. **Classify networks**:
+   - Cannot reach 8.8.8.8 → Internal (isolated) network → Add to `hosts allow`
+   - Can reach 8.8.8.8 → External network → Exclude from `hosts allow`
+5. **Generate security config**: Build `hosts allow = 127.0.0.1 [internal networks]` directive
+
+**Dependencies**: Requires `iputils-ping` package (added in line 61 of kerberos.dockerfile)
+
+**Security Model**:
+- Winbind RPC only accessible from localhost and detected internal networks
+- External-facing networks automatically excluded from access
+- No manual configuration required - adapts to any Docker network topology
+- Exposes read-only AD queries (user/group lookups, SID mapping)
+- Does NOT expose AD credentials or write operations
+
+**Integration**: SMB containers sharing the same keytab volume automatically have access to the winbind proxy for AD lookups. See readme.md lines 158-321 for complete architecture, verification commands, and deployment examples.
 
 ### Directory-Based Volume Sharing
 
@@ -87,11 +159,14 @@ See `/run/media/ts/root/home/ts/git/mriiot/otto/kerberos/readme.md` for complete
 
 **Primary Documentation:** See `/run/media/ts/root/home/ts/git/mriiot/otto/kerberos/readme.md` for:
 - Container architecture and lifecycle
-- AD initialization flow (8-step process)
+- AD initialization flow (9-step process including CIFS SPN registration)
 - Dynamic krb5.conf and smb.conf generation from KERBEROS_* environment variables
 - Standard Kerberos environment variables (KRB5_CONFIG, KRB5_KTNAME)
+- CIFS service principal registration for SMB/CIFS authentication
+- Winbind proxy architecture for multi-container SMB deployments
+- Network isolation detection and automatic security configuration
 - Directory-based volume sharing pattern for multi-container deployments
-- Keytab refresh mechanism
+- Keytab refresh mechanism (including CIFS SPN verification)
 - Health monitoring via Docker HEALTHCHECK (keytab validity and AD connectivity verification)
 - Environment variables and configuration reference (including KERBEROS_WORKGROUP for AD workgroup configuration)
 - Exit codes and troubleshooting
