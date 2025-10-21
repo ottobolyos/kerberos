@@ -63,6 +63,7 @@ RUN apt-get update && apt-get install -y \
     cron \
     dnsutils \
     iputils-ping \
+    iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create directory for Samba private data

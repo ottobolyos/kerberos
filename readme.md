@@ -582,7 +582,9 @@ The container installs only minimal AD integration packages:
 | `krb5-user` | Kerberos client utilities (kinit, klist, kdestroy) |
 | `winbind` | Samba's NT domain client service for Unix/AD integration and winbind proxy |
 | `samba-common-bin` | Common Samba utilities including the `net` command |
+| `socat` | Socket relay for TCP proxy (winbind proxy functionality) |
 | `dnsutils` | DNS query tools (nslookup, dig) for pre-flight DNS verification |
+| `iproute2` | Network configuration utilities providing the `ip` command for interface enumeration |
 | `iputils-ping` | Ping utility for network isolation detection (winbind security) |
 | `cron` | Standard cron daemon for scheduling keytab refresh |
 
