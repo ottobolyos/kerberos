@@ -155,6 +155,170 @@ Active Directory rotates machine account passwords every 30 days by default. The
 
 All output is logged to `/var/log/keytab-refresh.log` via cron redirection.
 
+## Winbind Proxy for Multi-Container SMB Deployments
+
+This container provides winbind proxy functionality for multi-container architectures where SMB services run in separate containers with isolated Docker networks.
+
+### Architecture Overview
+
+In deployments with isolated networks (`internal: true` in docker-compose), SMB containers cannot reach Active Directory domain controllers directly. The kerberos container acts as a proxy by exposing its winbind daemon over the internal network, enabling SMB containers to query AD for user/group information.
+
+```
+┌──────────────────────────┐
+│  Kerberos Container      │
+│  - Joined to AD          │
+│  - Exports keytab        │
+│  - Runs winbind          │
+│  - Winbind RPC proxy     │
+└───────────┬──────────────┘
+            │ Internal Network (isolated)
+    ┌───────┴────────┐
+    ↓                ↓
+┌──────────┐    ┌──────────┐
+│ SMB1     │    │ SMB2     │
+│ - smbd   │    │ - smbd   │
+│ - Queries│    │ - Queries│
+│   winbind│    │   winbind│
+│   proxy  │    │   proxy  │
+└──────────┘    └──────────┘
+```
+
+### How It Works
+
+1. **CIFS Authentication**: Windows clients request `cifs/hostname` tickets from AD
+2. **Ticket Decryption**: SMB containers decrypt tickets using the shared keytab (contains CIFS principals)
+3. **Authorization Check**: SMB needs to verify user permissions (e.g., group membership)
+4. **Winbind Proxy Query**: SMB container queries the kerberos container's winbind via RPC
+5. **AD Lookup**: Kerberos winbind forwards the query to AD (has external network access)
+6. **SID/UID Mapping**: Winbind returns user SID, group memberships, and Unix UID/GID mappings
+7. **Access Decision**: SMB grants or denies file access based on group membership
+
+### Automatic Network Security
+
+The container automatically detects internal (isolated) Docker networks and restricts winbind access to only those networks plus localhost.
+
+**Detection Method**: Tests external connectivity by pinging 8.8.8.8 from each network interface
+- Networks that **cannot** reach external hosts = internal (isolated) networks
+- Networks that **can** reach external hosts = external networks (excluded from winbind access)
+
+**Network Address Calculation**: Properly calculates network addresses from IP/CIDR using bitwise operations, supporting any subnet mask (/8, /16, /20, /24, etc.)
+
+**Generated Configuration**:
+```ini
+[global]
+   # ... other settings ...
+   rpc_server:winbind = embedded
+   rpc_daemon:winbindd = fork
+   hosts allow = 127.0.0.1 172.18.0.0/16
+```
+
+### Configuration
+
+The winbind proxy is **automatically configured during initialization**:
+- Enabled by default when the container joins AD
+- No additional environment variables required
+- Security automatically configured based on network topology
+
+**Automatic Settings in smb.conf**:
+- `rpc_server:winbind = embedded` - Enable RPC server within winbind process
+- `rpc_daemon:winbindd = fork` - Use forking model for concurrent RPC requests
+- `hosts allow` - Dynamically generated list of internal networks + localhost
+
+### Using the Winbind Proxy in SMB Containers
+
+SMB containers sharing the keytab from this container automatically have access to the winbind proxy for AD user/group lookups.
+
+**Requirements**:
+1. **Shared Keytab**: Mount the same keytab volume from this container
+2. **Network Access**: Connect to the same internal network as the kerberos container
+3. **Hostname Resolution**: Able to resolve the kerberos container's hostname
+
+**Example docker-compose.yml**:
+```yaml
+services:
+  kerberos:
+    image: your-kerberos-image:latest
+    environment:
+      KERBEROS_ADMIN_USER: "admin"
+      KERBEROS_ADMIN_PASSWORD: "password"
+      KERBEROS_REALM: "EXAMPLE.COM"
+      KRB5_CONFIG: "/etc/krb5/krb5.conf"
+      KRB5_KTNAME: "FILE:/etc/krb5/krb5.keytab"
+    volumes:
+      - kerberos-state:/var/lib/kerberos
+      - kerberos-config:/etc/krb5
+    networks:
+      - internal-network
+      - external-network
+
+  smb1:
+    image: your-samba-image:latest
+    volumes:
+      - kerberos-config:/etc/krb5:ro
+    networks:
+      - smb1-isolated  # SMB container's own network
+      - internal-network  # Access to kerberos winbind
+    depends_on:
+      - kerberos
+
+networks:
+  internal-network:
+    internal: true  # Isolated - no external access
+  external-network:
+    internal: false  # Kerberos can reach AD
+  smb1-isolated:
+    internal: true
+
+volumes:
+  kerberos-state:
+  kerberos-config:
+```
+
+### Verification Commands
+
+**From kerberos container (verify winbind works)**:
+```bash
+# Test winbind functionality
+wbinfo -u  # List AD users
+wbinfo -g  # List AD groups
+wbinfo -t  # Test trust
+
+# Verify winbind is running
+ps aux | grep winbindd
+```
+
+**From SMB container (verify can query winbind)**:
+```bash
+# Test AD user resolution
+getent passwd ad_username
+
+# Test AD group resolution
+getent group ad_groupname
+
+# View Samba logs for winbind activity
+tail -f /var/log/samba/log.smbd | grep -i winbind
+```
+
+### Security Considerations
+
+**Network Isolation**: The winbind RPC server is only accessible from internal Docker networks and localhost. External networks are automatically excluded from `hosts allow`, preventing unauthorized access.
+
+**Why This is Secure**:
+- Ping-based detection ensures only isolated networks are allowed
+- External-facing networks cannot access winbind RPC
+- Even if an attacker gains access to an external network, they cannot query AD through winbind
+- SMB containers on isolated networks can safely use winbind without AD credentials
+
+**What is Exposed**:
+- AD user/group lookups (read-only queries)
+- SID to UID/GID mapping
+- Group membership information
+
+**What is NOT Exposed**:
+- AD admin credentials (only kerberos container has these)
+- Ability to modify AD (winbind is read-only)
+- Kerberos ticket creation (tickets come from AD via keytab)
+
 ## Configuration Reference
 
 ### Environment Variables
@@ -247,9 +411,10 @@ The container installs only minimal AD integration packages:
 | `sssd-tools` | Command-line utilities for managing SSSD |
 | `adcli` | Low-level Active Directory client operations library |
 | `krb5-user` | Kerberos client utilities (kinit, klist, kdestroy) |
-| `winbind` | Samba's NT domain client service for Unix/AD integration |
+| `winbind` | Samba's NT domain client service for Unix/AD integration and winbind proxy |
 | `samba-common-bin` | Common Samba utilities including the `net` command |
 | `dnsutils` | DNS query tools (nslookup, dig) for pre-flight DNS verification |
+| `iputils-ping` | Ping utility for network isolation detection (winbind security) |
 | `cron` | Standard cron daemon for scheduling keytab refresh |
 
 ### File Locations

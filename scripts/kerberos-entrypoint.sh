@@ -242,6 +242,49 @@ if [ ! -f "$INITIALIZED" ]; then
 	realm_first_component="${KERBEROS_REALM%%.*}"
 	workgroup="${KERBEROS_WORKGROUP:-$realm_first_component}"
 
+	# Detect internal (isolated) networks for winbind security
+	echo ">> AD: Detecting internal networks for winbind access control ..."
+	internal_subnets=""
+
+	for iface in $(ip -o -4 addr show | grep -v "127.0.0.1" | awk '{print $2}' | sort -u); do
+		# Get the IP/CIDR for this interface
+		ip_cidr=$(ip -o -4 addr show "$iface" | awk '{print $4}')
+
+		# Calculate network address from IP/CIDR
+		# Extract IP and prefix length
+		ip_addr="${ip_cidr%/*}"
+		prefix="${ip_cidr#*/}"
+
+		# Convert IP to integer, apply netmask, convert back
+		IFS=. read -r i1 i2 i3 i4 <<< "$ip_addr"
+		ip_int=$((i1 * 256**3 + i2 * 256**2 + i3 * 256 + i4))
+		mask_int=$(( (0xFFFFFFFF << (32 - prefix)) & 0xFFFFFFFF ))
+		net_int=$((ip_int & mask_int))
+
+		# Convert network integer back to dotted decimal
+		n1=$((net_int >> 24 & 0xFF))
+		n2=$((net_int >> 16 & 0xFF))
+		n3=$((net_int >> 8 & 0xFF))
+		n4=$((net_int & 0xFF))
+		subnet="${n1}.${n2}.${n3}.${n4}/${prefix}"
+
+		# Test if this network can reach external hosts (8.8.8.8 = Google DNS)
+		if ! ping -c 1 -W 1 -I "$iface" 8.8.8.8 >/dev/null 2>&1; then
+			# Cannot reach external host = internal network
+			internal_subnets="${internal_subnets} ${subnet}"
+			echo "   Internal network detected: ${subnet} (interface: ${iface})"
+		fi
+	done
+
+	# Build hosts allow directive
+	hosts_allow="127.0.0.1"
+	if [ -n "${internal_subnets}" ]; then
+		hosts_allow="${hosts_allow}${internal_subnets}"
+		echo "   Winbind access restricted to: ${hosts_allow}"
+	else
+		echo "   No internal networks detected, winbind access limited to localhost"
+	fi
+
 	echo ">> AD: Generating /etc/samba/smb.conf for domain join ..."
 	mkdir -p /etc/samba
 	cat > /etc/samba/smb.conf <<-EOF
@@ -250,10 +293,15 @@ if [ ! -f "$INITIALIZED" ]; then
 	   realm = ${KERBEROS_REALM}
 	   security = ads
 	   kerberos method = system keytab
+	   rpc_server:winbind = embedded
+	   rpc_daemon:winbindd = fork
+	   hosts allow = ${hosts_allow}
 	EOF
 	chmod 644 /etc/samba/smb.conf
 	echo "   Workgroup: $workgroup"
 	echo "   Realm: ${KERBEROS_REALM}"
+	echo "   Winbind RPC: enabled (embedded server, forking daemon)"
+	echo "   Access control: ${hosts_allow}"
 
 	echo ">> AD: Joining the ${KERBEROS_REALM,,} domain ..."
 	net ads join -U"${KERBEROS_ADMIN_USER}%${KERBEROS_ADMIN_PASSWORD}"
