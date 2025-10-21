@@ -42,16 +42,16 @@ if ! net ads setspn list "${short_hostname}" -U"${KERBEROS_ADMIN_USER}%${KERBERO
 	echo "$(date): CIFS SPNs missing, re-registering ..."
 
 	if ! net ads setspn add "cifs/${fqdn}" -U"${KERBEROS_ADMIN_USER}%${KERBEROS_ADMIN_PASSWORD}"; then
-		echo "$(date): WARNING: Failed to register CIFS SPN for FQDN (cifs/${fqdn})" 1>&2
-	else
-		echo "$(date): Re-registered: cifs/${fqdn}"
+		echo "$(date): ERROR: Failed to register CIFS SPN for FQDN (cifs/${fqdn})" 1>&2
+		exit 1
 	fi
+	echo "$(date): Re-registered: cifs/${fqdn}"
 
 	if ! net ads setspn add "cifs/${short_hostname}" -U"${KERBEROS_ADMIN_USER}%${KERBEROS_ADMIN_PASSWORD}"; then
-		echo "$(date): WARNING: Failed to register CIFS SPN for short hostname (cifs/${short_hostname})" 1>&2
-	else
-		echo "$(date): Re-registered: cifs/${short_hostname}"
+		echo "$(date): ERROR: Failed to register CIFS SPN for short hostname (cifs/${short_hostname})" 1>&2
+		exit 1
 	fi
+	echo "$(date): Re-registered: cifs/${short_hostname}"
 else
 	echo "$(date): CIFS SPNs verified in AD"
 fi
@@ -67,7 +67,8 @@ klist -k "$KRB5_KEYTAB_FILE"
 
 # Verify CIFS principals are in the refreshed keytab
 if ! klist -k "$KRB5_KEYTAB_FILE" | grep -q "cifs/"; then
-	echo "$(date): WARNING: CIFS principals missing from keytab after refresh" 1>&2
+	echo "$(date): ERROR: CIFS principals missing from keytab after refresh" 1>&2
+	exit 1
 fi
 
 exit 0
